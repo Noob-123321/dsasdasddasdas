@@ -1,0 +1,1982 @@
+# TVS Analytics — полный план реализации
+
+Шаг 0. Обзор плана
+=====
+
+Блок проекта
+------------
+Название: TVS Analytics — Twitch-аналитика по лицензионному ключу
+Путь проекта: C:\Users\Artem\Downloads\pro\twitch
+Путь этого плана: C:\Users\Artem\Downloads\pro\twitch\plan
+Дата: 23.09.2026
+Статус: локальная реализация завершена; production PostgreSQL/Redis и внешние
+интеграции требуют окружения с Docker и сетевого smoke-теста
+
+Старые файлы `Пункт 0.txt` — `Пункт 18*.txt` сохранены в
+`C:\Users\Artem\.opencode\plan` и не перезаписываются. Текущий план находится
+в новых файлах `Шаг 0.txt` — `Шаг 12.txt` в папке проекта.
+
+Цель и обзор
+------------
+Сделать сервис, который открывается по ссылке, принимает один
+пользовательский лицензионный ключ, создаёт защищённую сессию и показывает
+портфель Twitch-стримеров с подробной аналитикой.
+
+Пользовательский сценарий:
+1. Пользователь открывает `/`.
+2. Вводит ключ формата `TVS_` + 128 случайных символов.
+3. Сервер проверяет ключ, при необходимости обновляет срок действия по
+   административной политике, создаёт HttpOnly-сессию и перенаправляет на
+   `/dashboard`.
+4. Новый профиль показывает пустой портфель и кнопку «Добавить».
+5. В модальном окне пользователь вставляет одну или несколько ссылок на
+   Twitch-каналы, разделённых пробелами или переводами строк.
+6. Каналы автоматически проверяются, добавляются в профиль и ставятся в
+   фоновый мониторинг.
+7. В профиле доступны текущие значения, история, портфель, аномалии,
+   объяснимый risk score, confidence, CSV/PDF-экспорт и API-ключи `tvs_`.
+8. Администратор входит отдельным админским ключом, управляет ключами,
+   профилями, списками каналов, сроками действия, аудитом и статистикой
+   нагрузки сервера.
+
+Архитектурное решение
+----------------------
+- Backend: FastAPI, Pydantic, SQLAlchemy 2, Alembic, Uvicorn.
+- Database: PostgreSQL. SQLite разрешён только для локальных тестов.
+- Фоновый сбор: отдельный процесс `poller`, интервал 60 секунд; тяжёлые
+  пересчёты вынесены в worker/aggregation job.
+- Frontend: dependency-light HTML/CSS/JS SPA, served by FastAPI; no Node build
+  step is required for local startup. The UI uses semantic HTML, delegated events,
+  SVG charts and shared CSS tokens.
+- Кэш и rate limiting: Redis; PostgreSQL остаётся источником истины.
+- Запуск: Docker Compose, reverse proxy с HTTPS, отдельные сервисы API и
+  poller.
+- Источник Twitch на первой версии: существующий анонимный GQL-клиент,
+  скрытый за адаптером. Добавляются probe-проверки полей, graceful
+  degradation и точка подключения официального Helix API в будущем.
+- Время и даты: UTC; суммы в копейках, если позже появится биллинг.
+
+Ключевые продуктовые решения
+----------------------------
+- `TVS_` — вход в профиль и административный доступ.
+- Формат ключа: `TVS_` плюс ровно 128 случайных URL-safe символов, всего
+  132 видимых символа.
+- Ключ бессрочный по умолчанию, но админ может задать `expires_at`; срок
+  можно изменить после создания.
+- Ключ можно посмотреть и скопировать администратору в любой момент.
+  Секрет не хранится открытым текстом: для копирования используется
+  шифрование, для поиска — отдельный SHA-256 lookup hash.
+- Один ключ разрешён на нескольких устройствах.
+- Роли не вводятся. Есть только профильные и административные ключи;
+  административность задаётся флагом записи, а не отдельной RBAC-системой.
+- Ограничения на количество каналов нет.
+- Для каждого профиля admin задаёт allowlist каналов или снимает
+  ограничение (`unlimited=true`).
+- Пользователь может добавлять и удалять каналы из своего портфеля в рамках
+  разрешённого списка; это не меняет глобальную настройку ключа.
+- API-ключи `tvs_` создаются внутри профиля, наследуют доступ к данным
+  родительского `TVS_` и автоматически перестают работать вместе с ним.
+  По умолчанию API-ключ даёт read-доступ к портфелю и аналитике; изменение
+  профиля и создание ключей выполняются через защищённый профиль/UI.
+- В API и UI не используется утверждение «это боты». Главное значение —
+  наблюдаемая аномальность и качество данных; решение остаётся за человеком.
+- Первая полная версия включает алерты и webhooks, но не включает
+  white-label виджет, платёжный биллинг, роли, SSO и chat-message sampler.
+
+Идеи, перенесённые из референсных проектов
+--------------------------------------------
+Из проекта OpenCode:
+- портфель каналов;
+- объяснимый risk score;
+- фоновая история и предподсчитанные агрегаты;
+- API-ключи со scopes/лимитами/квотами;
+- алерты и webhooks;
+- аудит и защищённые административные операции.
+
+Из проекта Claude:
+- автоматический старт наблюдения после первого открытия/добавления канала;
+- дедупликация повторяющихся значений;
+- отдельная дедупликация по изменениям зрителей и чаттеров;
+- сессии стримов с различием `ended_at` и `observed_until`;
+- измерительные пороги и probe-скрипты;
+- trust/quality score с explanation;
+- lifecycle-тесты поллера и остановки процесса.
+
+Сводная таблица шагов
+---------------------
+| Файл | О чём шаг |
+|------|------------|
+| `Шаг 0.txt` | Обзор, решения, границы и порядок работ |
+| `Шаг 1.txt` | Инвентаризация текущего проекта и целевой каркас |
+| `Шаг 2.txt` | TVS-ключи, API-ключи, сессии и безопасность |
+| `Шаг 3.txt` | PostgreSQL-схема, миграции и репозитории |
+| `Шаг 4.txt` | Twitch-адаптер, poller, история и дедупликация |
+| `Шаг 5.txt` | Метрики, аномалии, risk score и confidence |
+| `Шаг 6.txt` | Вход по ключу и управление портфелем |
+| `Шаг 7.txt` | Пользовательский дашборд и визуализация |
+| `Шаг 8.txt` | Публичный API v1 и документация API |
+| `Шаг 9.txt` | Админ-панель, аудит и статистика нагрузки |
+| `Шаг 10.txt` | CSV/PDF, алерты, Telegram и webhooks |
+| `Шаг 11.txt` | Docker, CI, мониторинг, backup и эксплуатация |
+| `Шаг 12.txt` | Тестирование, приёмка и релизный чек-лист |
+
+Фазы и ориентировочные сроки
+-----------------------------
+Оценки предполагают одного full-stack разработчика с доступом к тестовому
+Twitch-трафику и помощью DevOps. Это ориентир, а не обязательство.
+
+- Этап 1 (Шаги 1–3): фундамент, ключи, схема и безопасность — 1,5–2 недели.
+- Этап 2 (Шаги 4–5): сбор истории, метрики и объяснимый score — 2–3 недели.
+- Этап 3 (Шаги 6–7): профиль, портфель и дашборд — 2–3 недели.
+- Этап 4 (Шаги 8–10): API, документация, экспорт и алерты — 2–3 недели.
+- Этап 5 (Шаги 11–12): инфраструктура, нагрузочные тесты и релиз — 1–2 недели.
+
+Итого: ориентировочно 8–13 недель для первого полноценного релиза.
+
+Границы первой версии
+----------------------
+Входит:
+- один вход по TVS-ключу без регистрации email;
+- административный вход по отдельному TVS-ключу;
+- любые публичные Twitch-каналы через allowlist или unlimited-профиль;
+- фоновая история, графики, аномалии, score, confidence и explanation;
+- CSV/PDF, API v1, API-ключи, аудит, алерты и webhooks;
+- адаптивный dashboard и admin UI;
+- статистика пользователей и нагрузки сервера.
+
+Не входит:
+- платёжная подписка и биллинг;
+- роли, команды и enterprise SSO;
+- white-label виджет;
+- гарантированное определение ботов;
+- обнаружение событий короче примерно трёх минут;
+- обещание доступности неофициального GQL API.
+
+
+Шаг 1. Инвентаризация текущего проекта и целевой каркас
+=====
+
+Назначение и важность
+---------------------
+Перед изменением архитектуры зафиксировать реальное состояние
+`C:\Users\Artem\Downloads\pro\twitch`, отделить рабочий прототип от идей из
+двух референсных проектов и зафиксировать границы миграции. Код из
+`C:\Users\Artem\Downloads\twitch` и
+`C:\Users\Artem\Downloads\Telegram Desktop\twitch\twitch` не копируется;
+переиспользуются только проверенные идеи, схемы и правила.
+
+Приоритет: P0
+
+Затрагиваемые файлы
+--------------------
+- `C:\Users\Artem\Downloads\pro\twitch\README.md`
+- `C:\Users\Artem\Downloads\pro\twitch\src\server.py`
+- `C:\Users\Artem\Downloads\pro\twitch\src\twitch_gql_client.py`
+- `C:\Users\Artem\Downloads\pro\twitch\public\`
+- `C:\Users\Artem\Downloads\pro\twitch\tests\`
+- новые `app/`, `frontend/`, `docs/`, `migrations/`, `tests/`
+- новые `Dockerfile`, `docker-compose.yml`, `pyproject.toml`, `.env.example`
+
+1.1 Инвентаризация текущего состояния
+Описание
+Провести read-only аудит текущего прототипа: stdlib HTTP-сервер, JSON-хранилище
+подписок, один канал, покупка подписки, простой live-отчёт и фронтенд без
+аккаунтов/ролей/истории. Составить список функций, которые можно сохранить
+как адаптеры, и список функций, которые нужно заменить.
+
+Файлы
+`src/server.py`, `src/subscriptions.py`, `src/payments.py`,
+`src/twitch_gql_client.py`, `public/app.js`, `public/index.html`,
+`README.md`.
+
+Пример
+```powershell
+Get-ChildItem -Recurse -File C:\Users\Artem\Downloads\pro\twitch
+python -m compileall -q C:\Users\Artem\Downloads\pro\twitch\src
+```
+
+Критерий готовности
+Есть таблица «сохранить / переписать / исключить», нет скрытых зависимостей
+на JSON-файл подписок или детерминированный `TVS-НИК`.
+
+1.2 Целевая структура
+Описание
+Разделить код на backend, frontend, миграции, poller, документацию и тесты.
+Backend не должен читать `public/` как единственный источник логики;
+poller и web API должны использовать общие сервисы.
+
+Файлы
+`app/main.py`, `app/config.py`, `app/db.py`, `app/models/`,
+`app/services/`, `app/routers/`, `frontend/src/`, `docs/`, `migrations/`.
+
+Пример
+```text
+project/
+  app/
+    main.py
+    config.py
+    db.py
+    models/
+    schemas/
+    routers/
+    services/
+    security/
+  frontend/
+    src/
+  migrations/
+  docs/
+  tests/
+  tools/
+```
+
+Критерий готовности
+Новый backend запускается независимо от `src/server.py`, а все маршруты,
+модели и фоновые задачи имеют определённое место в структуре.
+
+1.3 Конфигурация и режимы
+Описание
+Разделить `APP_ENV`, `DATABASE_URL`, `REDIS_URL`, `TOKEN_ENCRYPTION_KEY`,
+`PUBLIC_BASE_URL`, `TWITCH_SOURCE`, polling interval, batch size,
+`ALLOWED_ORIGINS`, `TRUSTED_PROXIES` и лимиты. В development можно
+использовать локальные контейнеры, в production — только явные secrets.
+
+Файлы
+`app/config.py`, `.env.example`, `docker-compose.yml`, `pyproject.toml`,
+`README.md`, `docs/configuration.md`.
+
+Пример
+```env
+APP_ENV=production
+DATABASE_URL=postgresql+psycopg://...
+REDIS_URL=redis://redis:6379/0
+TOKEN_ENCRYPTION_KEY=<secret-manager-reference>
+PUBLIC_BASE_URL=https://tvs.example.com
+TWITCH_SOURCE=gql
+POLL_INTERVAL_SECONDS=60
+POLL_BATCH=200
+```
+
+Критерий готовности
+Приложение стартует с явной ошибкой, если в production отсутствуют
+`DATABASE_URL`, encryption key, HTTPS origin или миграции; секреты не имеют
+значений из репозитория.
+
+1.4 Стратегия перехода
+Описание
+Не делать одновременный rewrite. Сначала добавить новый FastAPI-каркас и
+контракты, затем перенести адаптер Twitch, потом poller и API, после этого
+переключить frontend. Старый `src/` оставить reference до зелёного
+приёмочного прогона.
+
+Файлы
+`app/`, `src/`, `frontend/`, `scripts/migrate_legacy.py`,
+`docs/migration.md`, `tests/test_migration.py`.
+
+Пример
+```powershell
+python -m pytest tests/test_migration.py -q
+python -m app.cli migrate
+```
+
+Критерий готовности
+На каждом этапе есть rollback-команда, миграция идемпотентна, а прототипи
+и новый сервис не пишут в одну неподконтрольную рабочую базу.
+
+
+Шаг 2. TVS-ключи, API-ключи, сессии и безопасность
+=====
+
+Назначение и важность
+---------------------
+Сделать вход по ключу основным сценарием, сохранить возможность повторно
+скопировать секрет администратору и не превращать браузерный профиль в
+публичную ссылку с секретом. Это самый критичный слой продукта и безопасности.
+
+Приоритет: P0
+
+Затрагиваемые файлы
+--------------------
+- `app/security/tokens.py`
+- `app/security/sessions.py`
+- `app/security/encryption.py`
+- `app/security/ratelimit.py`
+- `app/security/csrf.py`
+- `app/routers/auth.py`
+- `app/routers/admin.py`
+- `app/services/tokens.py`
+- `app/services/api_keys.py`
+- `app/services/audit.py`
+- `frontend/src/pages/LoginPage.tsx`
+- `frontend/src/pages/ProfilePage.tsx`
+- `frontend/src/api/client.ts`
+- `tests/security/test_tokens.py`
+- `tests/security/test_auth.py`
+- `tests/security/test_api_keys.py`
+
+1.1 Формат и генерация секретов
+Описание
+Генерировать `TVS_` + ровно 128 символов из безопасного URL-safe алфавита.
+Не использовать логин, время, UUID или предсказуемый счётчик. Создание
+секрета возвращает полное значение только в момент создания либо в ответе
+администратора после повторной аутентификации.
+
+Файлы
+`app/security/tokens.py`, `app/services/tokens.py`,
+`app/routers/admin.py`, `frontend/src/pages/AdminTokensPage.tsx`.
+
+Пример
+```python
+raw = "TVS_" + secrets.token_urlsafe(96)[:128]
+assert len(raw) == 132
+assert raw.startswith("TVS_")
+```
+
+Критерий готовности
+Все TVS-ключи имеют длину 132 и уникальный lookup hash; угадать ключ по
+профилю, дате или имени стримера невозможно.
+
+1.2 Хранение, копирование и отзыв
+Описание
+В БД хранить три представления: `prefix` для поиска в списках, уникальный
+SHA-256 hash для проверки входа и зашифрованный секрет для повторного
+показа администратору. Для шифрования использовать AEAD с ключом из secret
+manager. Просмотр/копирование секрета — отдельное аудируемое действие с
+повторной проверкой админ-сессии. Отзыв делает ключ недействительным
+немедленно во всех кэшах и API.
+
+Файлы
+`app/security/encryption.py`, `app/models/access_tokens.py`,
+`app/services/tokens.py`, `app/routers/admin.py`, `app/services/audit.py`.
+
+Пример
+```text
+POST /api/admin/tokens/{id}/reveal
+Cookie: tvs_session=<HttpOnly>
+Audit: admin revealed token prefix tvs_7Fk2...
+```
+
+Критерий готовности
+В логах, URL, Referer, error payload и localStorage нет полного секрета;
+администратор может скопировать действующий ключ, а после revoke он не
+проходит проверку даже при правильном значении.
+
+1.3 Профильные и административные ключи
+Описание
+Тип ключа хранится как `profile` или `admin`, без ролевой системы. Первый
+админский ключ создаётся bootstrap-командой/секретом при развёртывании;
+после этого администратор создаёт и отзывает другие административные
+ключи через панель. Обычный ключ не может изменить свой тип.
+
+Файлы
+`app/cli.py`, `app/models/access_tokens.py`, `app/routers/auth.py`,
+`app/routers/admin.py`, `docs/operations.md`.
+
+Пример
+```powershell
+$env:TVS_BOOTSTRAP_ADMIN_TOKEN="TVS_..."
+python -m app.cli create-admin --label "owner"
+```
+
+Критерий готовности
+После bootstrap администратор видит только административные операции;
+попытка выдать себе admin через профильный маршрут возвращает 403 и
+попадает в security-тесты.
+
+1.4 Обмен ключа на сессию
+Описание
+При вводе ключа отправлять POST body, не использовать query string.
+Сервер проверяет срок/revoke, создаёт или ротирует HttpOnly cookie, а ответ
+не содержит исходный токен. На всех state-changing запросах проверять
+Origin/CSRF-токен, cookie имеет `Secure` в production и `SameSite=Lax` или
+`Strict`.
+
+Файлы
+`app/routers/auth.py`, `app/security/sessions.py`,
+`frontend/src/pages/LoginPage.tsx`, `frontend/src/api/client.ts`.
+
+Пример
+```http
+POST /auth/redeem
+Content-Type: application/json
+
+{"token":"TVS_..."}
+```
+
+Критерий готовности
+Успешный redeem перенаправляет на `/dashboard`; неверный, истёкший и
+отозванный ключ дают нейтральную ошибку без раскрытия существования
+профиля.
+
+1.5 Дочерние API-ключи `tvs_`
+Описание
+В профиле создавать отдельные машинные ключи с префиксом `tvs_` и 128
+случайными символами. Они наследуют parent TVS-профиль, тот же список
+каналов и те же read-данные; при истечении/revoke родителя автоматически
+становятся недействительными. В API-ключе хранить префикс, hash,
+encrypted copy для повторного показа, parent_id, scopes, last_used_at и
+ revoked_at. По умолчанию scope только `read`.
+
+Файлы
+`app/models/api_keys.py`, `app/services/api_keys.py`,
+`app/routers/accounts.py`, `app/routers/v1.py`,
+`frontend/src/pages/ApiKeysPage.tsx`, `docs/api.md`.
+
+Пример
+```http
+Authorization: Bearer tvs_...
+GET /api/v1/channels/{login}/snapshot
+```
+
+Критерий готовности
+API-ключ не видит чужие каналы, не может обойти parent expiration и после
+отзыва parent немедленно получает 401/403 с кодом `parent_token_revoked`.
+
+1.6 Защита HTTP и abuse controls
+Описание
+Добавить лимиты на redeem, admin reveal, API-запросы и webhook-регистрации;
+маскировать Authorization в логах; применять CORS allowlist, security
+headers, ограничение размера JSON и запрет дублирующихся параметров.
+
+Файлы
+`app/main.py`, `app/security/ratelimit.py`, `app/security/csrf.py`,
+`app/middleware.py`, `tests/security/test_http.py`.
+
+Пример
+```text
+X-Content-Type-Options: nosniff
+Referrer-Policy: no-referrer
+X-Frame-Options: DENY
+```
+
+Критерий готовности
+Соседний сайт не может redeem-ить ключ, а flood, path traversal, XSS в
+title и подделка X-Forwarded-For покрыты автоматическими проверками.
+
+
+Шаг 3. PostgreSQL-схема, миграции и репозитории
+=====
+
+Назначение и важность
+---------------------
+Создать схему, которая выдерживает профили, административные ключи,
+дочерние API-ключи, сотни каналов, историю наблюдений и аудит без
+конкурирующих записей в JSON-файле. Схема должна заранее учитывать
+дедупликацию, сессии стримов, агрегаты, score и retention из идей Claude.
+
+Приоритет: P0
+
+Затрагиваемые файлы
+--------------------
+- `app/models/`
+- `app/db.py`
+- `app/repositories/`
+- `migrations/versions/`
+- `alembic.ini`
+- `scripts/migrate_legacy.py`
+- `tests/db/`
+- `docs/data-model.md`
+
+1.1 Профили, ключи и каналы
+Описание
+Создать `profiles` с меткой, unlimited-флагом и временем активности;
+`access_tokens` для `TVS_` с типом profile/admin, encrypted_secret,
+lookup_hash, prefix, expires_at, revoked_at, created_by и last_used;
+`api_keys` для `tvs_` с parent_access_token_id; `channels` как основной
+объект Twitch; `profile_channels` как связь профиля и канала.
+
+Файлы
+`app/models/profile.py`, `app/models/access_token.py`,
+`app/models/api_key.py`, `app/models/channel.py`,
+`app/models/profile_channel.py`, `migrations/versions/0001_initial.py`.
+
+Пример
+```text
+profiles(id, label, unlimited, created_at, last_seen_at)
+access_tokens(id, profile_id, kind, prefix, lookup_hash,
+              encrypted_secret, expires_at, revoked_at, last_used_at)
+profile_channels(profile_id, channel_login, source, added_at)
+```
+
+Критерий готовности
+Один профиль может иметь несколько ключей и каналов, но не может получить
+чужой канал через API; unlimited и allowlist имеют взаимоисключающие
+проверки.
+
+1.2 История наблюдений и сессии эфира
+Описание
+Добавить `streams`, `samples`, `samples_5m`, `samples_1h`,
+`metrics_daily`, `spikes` и `score_snapshots`. В `samples` хранить первый
+момент наблюдения, последний подтверждённый момент, repeat_count и
+interval_seconds. В `streams` различать `ended_at` (реально увидели уход)
+и `observed_until` (мы перестали наблюдать).
+
+Файлы
+`app/models/stream.py`, `app/models/sample.py`,
+`app/models/aggregates.py`, `app/models/score.py`,
+`migrations/versions/0002_observations.py`.
+
+Пример
+```text
+UNIQUE(login, observed_at, is_live)
+INDEX(login, observed_at)
+INDEX(login, bucket_start)
+```
+
+Критерий готовности
+Повторяющиеся значения продлевают строку, изменение только chatters создаёт
+новый факт, а перезапуск poller не выдаёт `observed_until` за конец стрима.
+
+1.3 Алерты, аудит и метрики сервера
+Описание
+Добавить `alert_rules`, `alert_events`, `webhooks`, `webhook_deliveries`,
+`audit_log` и `server_metrics`. Аудит хранит actor, action, object, IP,
+request_id, before/after без полного секрета. Метрики нагрузки хранятся
+агрегированными интервалами, чтобы не создавать огромный поток сырых логов.
+
+Файлы
+`app/models/alert.py`, `app/models/audit.py`,
+`app/models/server_metric.py`, `app/models/webhook.py`,
+`migrations/versions/0003_operations.py`.
+
+Пример
+```text
+server_metrics(metric_time, request_count, error_count, p50_ms,
+               p95_ms, poller_backlog, twitch_errors, db_pool_used)
+```
+
+Критерий готовности
+Администратор может найти, кто создал/изменил/показал/отозвал ключ, и
+получить временной ряд нагрузки без доступа к raw-логам с секретами.
+
+1.4 Индексы, ограничения и транзакции
+Описание
+Добавить уникальность lookup_hash, запрет повторного profile_channel,
+проверки диапазонов score/confidence/ratio, индексы под чтение истории и
+портфеля. Операции activate/revoke/reveal и webhook должны быть
+транзакционными и идемпотентными.
+
+Файлы
+`app/models/constraints.py`, `app/repositories/tokens.py`,
+`app/repositories/observations.py`, `migrations/versions/0004_constraints.py`.
+
+Пример
+```sql
+CREATE UNIQUE INDEX uq_access_tokens_hash ON access_tokens(lookup_hash);
+CREATE INDEX ix_samples_login_time ON samples(login, observed_at);
+```
+
+Критерий готовности
+Два параллельных redeem/revoke одного ключа не создают дубль, а тесты на
+PostgreSQL подтверждают foreign keys и ограничения.
+
+1.5 Retention и миграции
+Описание
+Задать raw samples на 30 дней, 5m aggregates на 14 дней, 1h/daily/score/
+spikes на постоянное хранение по умолчанию. Alembic должен уметь upgrade и
+downgrade; legacy JSON-импорт, если он нужен, — идемпотентный и с backup.
+
+Файлы
+`app/jobs/retention.py`, `scripts/migrate_legacy.py`,
+`migrations/env.py`, `docs/data-model.md`.
+
+Пример
+```powershell
+python -m alembic upgrade head
+python -m app.jobs.retention --dry-run
+```
+
+Критерий готовности
+Retention не удаляет исходные данные младше TTL, агрегаты остаются после
+очистки сырья, а повторный запуск не меняет агрегированные значения.
+
+
+Шаг 4. Twitch-адаптер, poller, история и дедупликация
+=====
+
+Назначение и важность
+---------------------
+Перевести сервис с «живого запроса при клике» на фоновую наблюдательную
+систему. Это даёт историю, графики, score и устойчивость к недоступности
+Twitch. Идеи Claude используются как механика: дедупликация по обоим
+измеренным полям, сессии эфира, backoff, graceful shutdown и probe-скрипты.
+
+Приоритет: P0
+
+Затрагиваемые файлы
+--------------------
+- `app/services/twitch_client.py`
+- `app/services/twitch_gql.py`
+- `app/services/poller.py`
+- `app/services/observations.py`
+- `app/services/stream_sessions.py`
+- `app/jobs/probe_fields.py`
+- `app/config.py`
+- `tools/probe_update_rate.py`
+- `tools/probe_field_independence.py`
+- `tools/probe_available_fields.py`
+- `tests/poller/`
+- `tests/twitch/`
+
+1.1 Изолированный Twitch-адаптер
+Описание
+Определить интерфейс `get_channel_stats(login)`. Первая реализация читает
+существующий анонимный GQL и возвращает только факты: is_live, stream_id,
+started_at, title, game, viewer_count, chatters_count, followers_count и
+дату создания канала, если поле доступно. Сетевые таймауты, retries и
+деградация `chatters` не должны ронять viewer_count.
+
+Файлы
+`app/services/twitch_client.py`, `app/services/twitch_gql.py`,
+`tests/twitch/test_client.py`.
+
+Пример
+```python
+stats = await twitch_client.get_channel_stats("tumblurr")
+# {is_live, viewer_count, chatters_count, stream_id, ...}
+```
+
+Критерий готовности
+Падение CommunityTab оставляет валидные данные зрителей и `chatters_error`,
+а изменение GQL обнаруживается probe-скриптом и не маскируется как офлайн.
+
+1.2 Probe-измерения вместо выдуманных констант
+Описание
+Добавить периодические проверки доступных полей, частоты изменения
+счётчиков, независимости viewers/chatters и cluster correlation. Результаты
+разделять на «измерено» и «выбор продукта». Не использовать корреляцию
+между каналами как доказательство накрутки без новой валидации.
+
+Файлы
+`app/jobs/probe_fields.py`, `tools/probe_*.py`, `docs/methodology.md`,
+`tests/tools/test_probe_outputs.py`.
+
+Пример
+```powershell
+python tools/probe_available_fields.py --login tumblurr
+python tools/probe_field_independence.py --minutes 5
+```
+
+Критерий готовности
+В репозитории есть воспроизводимые измерения, а константы скоринга ссылаются
+на источник измерения или явно помечены как продуктовый выбор.
+
+1.3 Фоновый poller
+Описание
+Сделать отдельный процесс с интервалом 60 секунд. Он выбирает активные
+каналы, работает пачками, коммитит блоками, а интерфейс только читает БД.
+Канал автоматически попадает в active после добавления в профиль или первого
+успешного открытия отчёта.
+
+Файлы
+`app/services/poller.py`, `app/jobs/run_poller.py`,
+`app/repositories/channels.py`, `docker-compose.yml`, `.env.example`.
+
+Пример
+```powershell
+python -m app.jobs.run_poller --once
+python -m app.jobs.run_poller
+```
+
+Критерий готовности
+При 1000 активных каналах цикл укладывается в допустимый интервал,
+ошибка одного канала не откатывает уже записанные данные других, а
+остановка не оставляет активных транзакций.
+
+1.4 Дедупликация и сессии стримов
+Описание
+Если изменились только viewers или только chatters, создавать новую
+наблюдаемую строку. Если оба значения и live-статус неизменны, продлевать
+предыдущую строку. Открывать новую stream-сессию при новом stream_id, не
+закрывать её при shutdown и записывать `ended_at` только после наблюдаемого
+ухода в офлайн.
+
+Файлы
+`app/services/observations.py`, `app/services/stream_sessions.py`,
+`app/models/stream.py`, `tests/poller/test_dedup.py`.
+
+Пример
+```text
+(viewers=100, chatters=20) -> новая строка
+(viewers=100, chatters=20) -> extend last_seen/repeat_count
+(viewers=100, chatters=21) -> новая строка
+```
+
+Критерий готовности
+Тесты проверяют смену только одного поля, переход live/offline, рестарт
+процесса и разницу между `ended_at` и `observed_until`.
+
+1.5 Ошибки, backoff и остановка
+Описание
+Для каждого канала применять retry с backoff 5–300 секунд, не роняя весь
+poller. Обрабатывать Ctrl+C, SIGTERM и Windows SIGBREAK: перестать новые
+опросы, дождаться текущего блока, закрыть сессии через observed_until,
+сохранить агрегаты и выйти с диагностикой.
+
+Файлы
+`app/services/poller.py`, `app/jobs/shutdown.py`,
+`tests/poller/test_shutdown.py`, `tests/lifecycle/test_process.py`.
+
+Пример
+```python
+poller.stop()
+poller.shutdown()
+assert stats["errors"] == 0
+```
+
+Критерий готовности
+Lifecycle-тест запускает настоящий процесс, останавливает его сигналом и
+проверяет отсутствие потери уже записанных данных.
+
+
+Шаг 5. Метрики, аномалии, risk score и confidence
+=====
+
+Назначение и важность
+---------------------
+Превратить сырые наблюдения в честную аналитику, которую можно показать
+пользователю и объяснить в API. Визуальный индекс и качество данных должны
+быть разными числами: ни один из них не должен называться вероятностью
+накрутки.
+
+Приоритет: P0
+
+Затрагиваемые файлы
+--------------------
+- `app/services/aggregates.py`
+- `app/services/spikes.py`
+- `app/services/scoring.py`
+- `app/services/explanations.py`
+- `app/jobs/recompute_metrics.py`
+- `app/models/score_snapshots.py`
+- `app/services/reporting.py`
+- `tests/analytics/`
+- `docs/methodology.md`
+
+1.1 Измеренные и производные величины
+Описание
+Хранить и возвращать `viewer_count` и `chatters_count` как факты.
+`authorized` ограничивать общим числом зрителей, `guests` считать как
+`max(viewers - authorized, 0)`, `chat_ratio` — как `chatters / viewers`.
+Никогда не называть гостей ботами без отдельного доказательства.
+
+Файлы
+`app/services/metrics.py`, `app/schemas/analytics.py`,
+`tests/analytics/test_derived_metrics.py`.
+
+Пример
+```json
+{
+  "total_viewers": 1000,
+  "authorized": 250,
+  "guests": 750,
+  "chat_ratio": 0.25
+}
+```
+
+Критерий готовности
+Производные значения нельзя изменить независимо от фактов, а нулевые и
+неизвестные значения различаются (`null`, а не 0).
+
+1.2 Суточные и временные агрегаты
+Описание
+Считать время в эфире по длительности наблюдённых значений, среднее по
+времени, пик, медиану chat_ratio, число сессий и всплесков. Строить
+5m/1h ряды для графиков, суточные таблицы — для длинных отчётов. Пересчёт
+окна делать идемпотентно с lookback после простоя.
+
+Файлы
+`app/services/aggregates.py`, `app/models/aggregates.py`,
+`app/jobs/recompute_metrics.py`, `tests/analytics/test_aggregates.py`.
+
+Пример
+```text
+stream_seconds = сумма интервалов пересечения с окном
+avg_viewers = взвешенное среднее по длительности
+```
+
+Критерий готовности
+Замер, пересекающий границу суток, учитывается пропорционально; повторный
+пересчёт даёт тот же результат и не создаёт дублей.
+
+1.3 Детектор аномалий
+Описание
+Использовать двойной порог: максимум из `baseline * 1.5` и
+`baseline + 3 * MAD`. Сохранять baseline, MAD, число фоновых замеров и
+правило, которое сработало. Различать `single_point`, `flat_top`, `smooth`
+и `unknown`; для короткого пика не заполнять производные длительности.
+
+Файлы
+`app/services/spikes.py`, `app/models/spike.py`,
+`tests/analytics/test_spikes.py`.
+
+Пример
+```json
+{
+  "type": "viewer_spike",
+  "amplitude": 3.4,
+  "shape": "flat_top",
+  "is_instant": false,
+  "baseline_method": "median_mad",
+  "warnings": []
+}
+```
+
+Критерий готовности
+Плоский ряд не даёт аномалию, короткий пик помечается `is_instant`,
+порог и его объяснение доступны в UI/API/PDF.
+
+1.4 Risk score 0–100
+Описание
+Считать отдельный индекс подозрительной необычности из факторов: низкая
+доля чаттеров, всплеск зрителей без реакции чата, пилообразная динамика и
+последующий category outlier. Пропущенный фактор не штрафуется, его вес
+перераспределяется. Вердикты: green/yellow/red/nd.
+
+Файлы
+`app/services/scoring.py`, `app/models/score_snapshots.py`,
+`tests/analytics/test_scoring.py`, `docs/methodology.md`.
+
+Пример
+```json
+{
+  "risk_score": 72,
+  "verdict": "red",
+  "factors": [
+    {"code": "low_ratio", "value": 0.012, "score": 1.0, "weight": 0.35}
+  ]
+}
+```
+
+Критерий готовности
+Синтетический аномальный ряд даёт более высокий score, ровный ряд — более
+низкий score; сумма активных весов равна единице, а отсутствие данных не
+превращается в уверенный зелёный вердикт.
+
+1.5 Confidence и explanation
+Описание
+Confidence 0–1 считать отдельно через качество данных: coverage, density,
+ratio_stability, spikes, age_trusted и число наблюдений. При confidence ниже
+порога показывать «предварительно»/«н/д». explanation формировать на русском
+и включать окно расчёта, factors, warnings и количество samples.
+
+Файлы
+`app/services/scoring.py`, `app/services/explanations.py`,
+`frontend/src/components/ScoreBreakdown.tsx`, `tests/analytics/test_confidence.py`.
+
+Пример
+```text
+Итог 0.72 при достоверности 0.38.
+Данных мало: оценка предварительная и может измениться.
+```
+
+Критерий готовности
+Каждое число в dashboard и API можно раскрыть до факторов; UI не показывает
+красный вердикт как доказанный факт при низком confidence.
+
+1.6 Периодический пересчёт
+Описание
+Спайки и агрегаты пересчитывать после каждого цикла с lookback 2 часа;
+score_snapshot записывать не чаще раза в 6 часов. Старую score-историю не
+перезаписывать, а новые вычисления делать идемпотентными.
+
+Файлы
+`app/jobs/recompute_metrics.py`, `app/services/poller.py`,
+`tests/analytics/test_idempotency.py`.
+
+Пример
+```python
+recompute_metrics(login, since=now - timedelta(hours=2), now=now)
+```
+
+Критерий готовности
+Перезапуск poller не создаёт тысячи одинаковых score-строк, а latest score
+для портфеля читается одним запросом.
+
+
+Шаг 6. Вход по ключу и управление портфелем
+=====
+
+Назначение и важность
+---------------------
+Реализовать основной пользовательский сценарий: один TVS-ключ открывает
+профиль, новый профиль пустой, а кнопка «Добавить» принимает несколько
+ссылок на Twitch-каналы. Сервер должен проверять права каждого канала и
+сразу ставить разрешённые каналы в наблюдение.
+
+Приоритет: P0
+
+Затрагиваемые файлы
+--------------------
+- `app/routers/auth.py`
+- `app/routers/profiles.py`
+- `app/services/profile_channels.py`
+- `app/services/channel_parser.py`
+- `app/repositories/profiles.py`
+- `app/repositories/channels.py`
+- `frontend/src/pages/LoginPage.tsx`
+- `frontend/src/pages/DashboardPage.tsx`
+- `frontend/src/components/AddChannelsModal.tsx`
+- `frontend/src/api/client.ts`
+- `tests/profiles/`
+
+1.1 Landing и обмен ключа на сессию
+Описание
+Сделать `/` отдельной страницей входа: одно поле, понятная инструкция,
+маскирование ввода, кнопка «Войти» и нейтральные состояния ошибки. После
+успешного `POST /auth/redeem` ставить HttpOnly cookie и делать client-side
+redirect на `/dashboard`.
+
+Файлы
+`app/routers/auth.py`, `app/security/sessions.py`,
+`frontend/src/pages/LoginPage.tsx`, `frontend/src/routes.tsx`.
+
+Пример
+```text
+Пользователь: TVS_<128 символов>
+Ответ: 204 + Set-Cookie: tvs_session=...
+Переход: /dashboard
+```
+
+Критерий готовности
+При валидном ключе пользователь оказывается на пустом dashboard, при
+невалидном не получает полезную информацию о других профилях.
+
+1.2 Парсер многострочного ввода
+Описание
+Принимать текст, разбивать по пробельным символам и переводам строк,
+извлекать Twitch URL или голый login, нормализовать в lowercase, удалять
+дубликаты и сохранять порядок. Показывать пользователю итог: принято,
+дубликаты, невалидные ссылки и уже существующие каналы.
+
+Файлы
+`app/services/channel_parser.py`, `app/schemas/channels.py`,
+`frontend/src/components/AddChannelsModal.tsx`, `tests/profiles/test_parser.py`.
+
+Пример
+```text
+https://www.twitch.tv/tumblurr
+https://twitch.tv/pesh
+the_realmarzaa
+```
+
+Критерий готовности
+Одна ссылка и 20 ссылок в одном textarea обрабатываются одинаково;
+ссылки с query/fragment нормализуются, запрещённые пути отклоняются.
+
+1.3 Проверка allowlist и unlimited
+Описание
+После нормализации проверять для каждого канала: разрешён ли он профилю
+администратором. Для `unlimited=true` разрешать любой публичный канал,
+кроме системных зарезервированных путей. Для ограниченного профиля
+возвращать частичный успех и список отклонённых каналов без утечки внутренних
+настроек.
+
+Файлы
+`app/routers/profiles.py`, `app/services/profile_channels.py`,
+`app/services/access_policy.py`, `tests/profiles/test_permissions.py`.
+
+Пример
+```json
+{
+  "added": ["tumblurr", "pesh"],
+  "duplicates": ["tumblurr"],
+  "rejected": ["private_channel"]
+}
+```
+
+Критерий готовности
+Ограниченный ключ не может добавить запрещённый канал даже прямым API-
+вызовом; unlimited-ключ работает без скрытого лимита количества.
+
+1.4 Пустой портфель и добавление
+Описание
+Сделать empty state с заголовком портфеля, счётчиком `0`, подсказкой и
+кнопкой «Добавить». После успешного добавления закрыть modal, обновить
+список и показать toast с числом новых каналов. Ошибка одного канала не
+отменяет успешное добавление остальных.
+
+Файлы
+`frontend/src/pages/DashboardPage.tsx`,
+`frontend/src/components/AddChannelsModal.tsx`,
+`frontend/src/components/EmptyPortfolio.tsx`, `tests/e2e/test_add_channels.py`.
+
+Пример
+```text
+Портфель пуст
+Добавьте одного или нескольких стримеров
+[Добавить]
+```
+
+Критерий готовности
+Новый профиль выглядит пустым, а не сломанным; массовое добавление
+остаётся доступным после перезагрузки страницы.
+
+1.5 Управление каналами профиля
+Описание
+Разрешить пользователю удалять канал из своего портфеля и просматривать
+его live/history/score. Административное изменение allowlist не должно
+мгновенно ломать открытый профиль: удалённый канал исчезает после refresh,
+но его история и аудит сохраняются.
+
+Файлы
+`app/routers/profiles.py`, `app/services/profile_channels.py`,
+`frontend/src/pages/ChannelDetailPage.tsx`, `tests/profiles/test_remove_channel.py`.
+
+Пример
+```http
+DELETE /api/profile/channels/tumblurr
+GET /api/profile/channels/tumblurr/history
+```
+
+Критерий готовности
+Удаление из портфеля не удаляет глобальные данные и не изменяет настройки
+другого профиля.
+
+1.6 Автообновление и свежесть
+Описание
+После добавления poller начинает наблюдение автоматически. Клиент polling
+раз в 30 секунд показывает age/freshness последнего snapshot; при ошибке
+Twitch не показывает пустые нули, а последние сохранённые значения с
+предупреждением.
+
+Файлы
+`app/routers/profiles.py`, `app/services/freshness.py`,
+`frontend/src/hooks/useChannelSnapshot.ts`, `tests/profiles/test_freshness.py`.
+
+Пример
+```json
+{"fetched_at":"2026-09-23T12:00:00Z","stale":true,"age_seconds":185}
+```
+
+Критерий готовности
+Пользователь всегда понимает, когда данные актуальны, а outage не
+превращается в ложный «оффлайн».
+
+
+Шаг 7. Пользовательский дашборд и визуализация
+=====
+
+Назначение и важность
+---------------------
+Сделать интерфейс уровня референсного макета: тёмный фон, фиолетовый
+акцент, боковая навигация, KPI-карточки, таблица портфеля, графики и
+понятная детализация. Это не просто украшение: визуализация должна быстро
+показывать свежесть, риск и объяснение сигнала.
+
+Приоритет: P0
+
+Затрагиваемые файлы
+--------------------
+- `frontend/src/pages/DashboardPage.tsx`
+- `frontend/src/pages/ChannelDetailPage.tsx`
+- `frontend/src/pages/HistoryPage.tsx`
+- `frontend/src/pages/AlertsPage.tsx`
+- `frontend/src/components/PortfolioTable.tsx`
+- `frontend/src/components/KpiCard.tsx`
+- `frontend/src/components/AudienceChart.tsx`
+- `frontend/src/components/ScoreBreakdown.tsx`
+- `frontend/src/components/FreshnessBadge.tsx`
+- `frontend/src/styles/`
+- `frontend/src/api/`
+- `tests/e2e/`
+
+1.1 Визуальная система и shell
+Описание
+Сделать layout с левым sidebar: «Портфель», «История», «Алерты», «API-ключи»,
+«Настройки». Основная область содержит заголовок, кнопку «Добавить»,
+индикатор автообновления, KPI-карточки и таблицу. Использовать CSS tokens,
+focus-visible, контрастную типографику и responsive breakpoints.
+
+Файлы
+`frontend/src/components/AppShell.tsx`,
+`frontend/src/components/Sidebar.tsx`, `frontend/src/styles/tokens.css`,
+`frontend/src/styles/app.css`.
+
+Пример
+```text
+┌──────────────┬─────────────────────────────────────────────┐
+│ TVS Analytics│ Портфель              [Добавить] [30 сек]  │
+│              │ ┌────────┐ ┌────────┐ ┌────────┐ ┌────────┐ │
+│ Портфель     │ │Каналы  │ │Зрители │ │Риск    │ │Свежесть│ │
+│ История      │ └────────┘ └────────┘ └────────┘ └────────┘ │
+│ API-ключи    │ Таблица каналов с графиком и score           │
+└──────────────┴─────────────────────────────────────────────┘
+```
+
+Критерий готовности
+Дизайн читается на 1280 и 1920, на мобильном sidebar превращается в drawer,
+а все кнопки доступны с клавиатуры.
+
+1.2 Портфель и KPI
+Описание
+Показать количество каналов, суммарных зрителей, число каналов с score
+выше порога, API-квоту/количество запросов и свежесть данных. Таблица:
+канал, live, всего, чат, гости, ratio, risk, confidence, mini-sparkline и
+меню действий.
+
+Файлы
+`frontend/src/pages/DashboardPage.tsx`,
+`frontend/src/components/KpiCard.tsx`,
+`frontend/src/components/PortfolioTable.tsx`, `frontend/src/api/portfolio.ts`.
+
+Пример
+```json
+{"channels":12,"total_viewers":64908,"flagged":2,"api_usage_percent":38}
+```
+
+Критерий готовности
+Фильтры, сортировка и цветовой verdict работают без перезагрузки, а
+отсутствие данных отображается как `н/д`, а не ноль.
+
+1.3 Графики и детализация
+Описание
+Сделать графики all/auth/guests/ratio с переключением 1h/24h/7d/30d;
+выделить spikes вертикальными маркерами. На странице канала показывать
+score donut, factors, warnings, список аномалий, текст stream title,
+свежесть и ссылку на экспорт.
+
+Файлы
+`frontend/src/components/AudienceChart.tsx`,
+`frontend/src/components/ScoreBreakdown.tsx`,
+`frontend/src/pages/ChannelDetailPage.tsx`, `frontend/src/pages/HistoryPage.tsx`.
+
+Пример
+```text
+score 63/100 · confidence 0.42 · предварительно
+Низкий chat_ratio: 0.014
+Всплеск +330% без роста чата
+```
+
+Критерий готовности
+Пользователь может перейти от KPI к конкретному каналу и понять, почему
+он красный, не открывая исходный код или API.
+
+1.4 Данные и обновление
+Описание
+Использовать TanStack Query с query keys по профилю/каналу/периоду,
+polling 30 секунд для UI, кэш ответов на 15–30 секунд и отмену запросов
+при уходе со страницы. При 429/5xx не спамить сервер, показывать retry и
+последние успешные данные.
+
+Файлы
+`frontend/src/api/client.ts`, `frontend/src/queries/`,
+`frontend/src/hooks/usePolling.ts`, `frontend/src/components/QueryState.tsx`.
+
+Пример
+```ts
+useQuery({ queryKey: ['portfolio'], queryFn: getPortfolio,
+           refetchInterval: 30_000 })
+```
+
+Критерий готовности
+Десять вкладок не создают десять независимых опросов Twitch: API читает БД,
+а один browser polling не превышает лимит.
+
+1.5 Состояния, доступность и производительность
+Описание
+Реализовать loading skeleton, empty state, stale banner, permission error и
+success toast. Таблица должна иметь caption/headers, графики — текстовое
+описание, модальное окно — focus trap и Esc. Проверить reduced motion,
+контраст и keyboard navigation.
+
+Файлы
+`frontend/src/components/States.tsx`, `frontend/src/components/Modal.tsx`,
+`frontend/src/styles/a11y.css`, `tests/e2e/test_accessibility.py`.
+
+Пример
+```text
+Данные устарели: последний снимок 3 мин 12 сек назад.
+Показать сохранённый отчёт
+```
+
+Критерий готовности
+Основной пользовательский путь проходит без мыши, а Lighthouse/Playwright
+не показывает критических ошибок доступности.
+
+
+Шаг 8. Публичный API v1 и документация API
+=====
+
+Назначение и важность
+---------------------
+Дать пользователю машинный доступ к той же аналитике, которую он видит в
+профиле. API-ключи `tvs_` создаются в профиле, наследуют parent TVS и
+действуют только вместе с ним. Документация должна быть одновременно
+автоматической, проверяемой и понятной человеку.
+
+Приоритет: P0
+
+Затрагиваемые файлы
+--------------------
+- `app/routers/v1.py`
+- `app/schemas/v1/`
+- `app/deps/api_auth.py`
+- `app/services/api_usage.py`
+- `app/routers/docs.py`
+- `docs/api/quickstart.md`
+- `docs/api/endpoints.md`
+- `docs/api/errors.md`
+- `docs/api/examples/`
+- `docs/CHANGELOG.md`
+- `frontend/src/pages/ApiKeysPage.tsx`
+- `tests/api/`
+
+1.1 Аутентификация и наследование доступа
+Описание
+Принимать `Authorization: Bearer tvs_...`. При каждом запросе проверить
+родительский TVS, срок/revoke, child key, scope и разрешённые каналы.
+Ошибка parent должна быть различимой только на уровне диагностики, без
+утечки чужих профилей.
+
+Файлы
+`app/deps/api_auth.py`, `app/services/api_keys.py`,
+`app/routers/v1.py`, `app/schemas/errors.py`.
+
+Пример
+```http
+Authorization: Bearer tvs_<секрет>
+GET /api/v1/channels/tumblurr/snapshot
+```
+
+Критерий готовности
+Действующий child видит данные родительского портфеля, не видит чужие
+каналы, а revoke/expire parent запрещает child независимо от его собственного
+срока.
+
+1.2 Контракт и read-endpoints
+Описание
+Реализовать snapshot, history, anomalies, summary, batch snapshots и
+profile portfolio summary. Единый envelope: `{ok, data, meta}` для успеха и
+`{ok:false, error:{code,message,details}, meta:{request_id}}` для ошибки.
+Историю отдавать cursor-based с `from`, `to`, `interval` и `limit`.
+
+Файлы
+`app/routers/v1.py`, `app/schemas/v1/`,
+`app/services/portfolio.py`, `tests/api/test_contract.py`.
+
+Пример
+```json
+{
+  "ok": true,
+  "data": {"channel":"tumblurr","total_viewers":48122,
+           "authorized":15021,"guests":33101,"score":null},
+  "meta": {"request_id":"req_..."}
+}
+```
+
+Критерий готовности
+Все поля имеют nullable/empty semantics, даты ISO-8601 UTC, а history
+имеет стабильный cursor и не возвращает offset-зависимые дубли.
+
+1.3 Лимиты, квоты и идемпотентность
+Описание
+Добавить per-key rate limit, месячную quota, заголовки
+`X-RateLimit-Limit/Remaining/Reset`, `Retry-After` при 429 и `request_id`.
+Для POST-операций в будущем поддержать `Idempotency-Key`; read API v1 можно
+оставить без POST-эффектов.
+
+Файлы
+`app/services/api_usage.py`, `app/security/ratelimit.py`,
+`app/routers/v1.py`, `tests/api/test_limits.py`.
+
+Пример
+```text
+X-RateLimit-Limit: 300
+X-RateLimit-Remaining: 271
+X-RateLimit-Reset: 1790000000
+```
+
+Критерий готовности
+Два параллельных запроса не обходят счётчик, исчерпание квоты даёт
+стабильный код `quota_exhausted`, а превышение rate limit не роняет worker.
+
+1.4 Автоматическая и человеческая документация
+Описание
+Включить OpenAPI 3.1, `/docs`, `/redoc`, `/openapi.json`. Написать quickstart,
+таблицу endpoints, схемы, ошибки, scopes, ограничения, срок жизни ключа,
+родительскую связь, curl/Python/JavaScript примеры и changelog.
+
+Файлы
+`app/main.py`, `app/routers/docs.py`, `docs/api/`,
+`docs/CHANGELOG.md`, `tests/api/test_openapi.py`.
+
+Пример
+```bash
+curl -H "Authorization: Bearer $TVS_API_KEY" \
+  https://tvs.example.com/api/v1/channels/tumblurr/history?interval=5m
+```
+
+Критерий готовности
+Пример из документации копируется и работает на тестовом ключе; OpenAPI
+валидна; каждый endpoint имеет description, auth, errors и response schema.
+
+1.5 Управление API-ключами в профиле
+Описание
+Сделать страницу создания, копирования, revocation и списка ключей. Показывать
+prefix, дату создания, last_used_at, parent expiry и состояние, но не
+показывать секрет в обычных списках. Reveal/copy — отдельное аудируемое
+действие.
+
+Файлы
+`app/routers/profiles.py`, `app/routers/accounts.py`,
+`frontend/src/pages/ApiKeysPage.tsx`, `frontend/src/components/CopyButton.tsx`.
+
+Пример
+```text
+tvs_7Fk2... · read · действует до parent expiry · создан 23.09.2026
+```
+
+Критерий готовности
+Пользователь может создать несколько независимых API-ключей и отозвать
+каждый отдельно, не влияя на TVS-вход.
+
+
+Шаг 9. Админ-панель, аудит и статистика нагрузки
+=====
+
+Назначение и важность
+---------------------
+Сделать единую административную поверхность без ролевой системы:
+административные TVS-ключи дают доступ к управлению профилями, ключами,
+каналами и наблюдением. Отдельный обязательный блок — понять текущую
+нагрузку сервера и активность пользователей без чтения сырых логов.
+
+Приоритет: P0
+
+Затрагиваемые файлы
+--------------------
+- `app/routers/admin.py`
+- `app/services/admin_tokens.py`
+- `app/services/audit.py`
+- `app/services/server_metrics.py`
+- `app/jobs/metrics_collector.py`
+- `app/models/server_metric.py`
+- `frontend/src/pages/admin/AdminOverviewPage.tsx`
+- `frontend/src/pages/admin/AdminTokensPage.tsx`
+- `frontend/src/pages/admin/AdminProfilesPage.tsx`
+- `frontend/src/pages/admin/AdminAuditPage.tsx`
+- `frontend/src/pages/admin/AdminLoadPage.tsx`
+- `tests/admin/`
+
+1.1 Вход и bootstrap администратора
+Описание
+Первый admin TVS создаётся bootstrap-командой при развёртывании. После
+этого только администратор может создавать другие admin TVS. Проверка admin
+выполняется по типу access token, не по имени пользователя и не по
+суффиксу ключа.
+
+Файлы
+`app/routers/admin.py`, `app/cli.py`, `app/services/admin_tokens.py`,
+`frontend/src/pages/admin/AdminLoginPage.tsx`.
+
+Пример
+```powershell
+python -m app.cli create-admin --label "Владелец"
+```
+
+Критерий готовности
+Профильный TVS не видит `/admin`; скомпрометированный admin key можно
+отозвать, и все его сессии немедленно завершаются.
+
+1.2 Управление профилями и TVS-ключами
+Описание
+Сделать таблицу профилей и ключей: label, prefix, тип, created/last_used,
+expiry, revoked, unlimited, число каналов, quota и статус. Админ может
+создать user TVS или admin TVS, задать бессрочный/limited срок, изменить
+срок после создания, скопировать секрет, отозвать ключ и включить unlimited.
+
+Файлы
+`app/routers/admin.py`, `app/services/tokens.py`,
+`frontend/src/pages/admin/AdminTokensPage.tsx`,
+`frontend/src/components/TokenDrawer.tsx`.
+
+Пример
+```json
+{"kind":"profile","unlimited":true,"expires_at":null,
+ "allowed_channels":[]}
+```
+
+Критерий готовности
+Изменение expiry/allowlist видно в аудите и применяется к новым запросам
+не позже следующей секунды, а старая сессия учитывает отзыв.
+
+1.3 Управление каналами и правами
+Описание
+Показать карточку профиля с каналами, источником (`profile`, `admin`,
+`api`), датой добавления, live/score и причиной ограничения. Админ может
+добавить канал в allowlist, убрать его или снять все ограничения; пользователь
+при этом не получает административных прав.
+
+Файлы
+`app/routers/admin.py`, `app/services/access_policy.py`,
+`frontend/src/pages/admin/AdminProfilesPage.tsx`,
+`tests/admin/test_channel_policy.py`.
+
+Пример
+```text
+Профиль #42
+Ограничения: выключены
+Каналы: 18 добавлено пользователем, 4 доступно администратору
+```
+
+Критерий готовности
+Изменение allowlist не изменяет данные канала и не даёт пользователю
+возможность добавить запрещённый канал через обход UI.
+
+1.4 Аудит операций
+Описание
+Писать audit event на вход, logout, redeem, reveal/copy, create, update,
+revoke, channel policy change, export, webhook change и admin load access.
+Хранить actor, action, object id, before/after без секретов, IP,
+user-agent, request_id и timestamp.
+
+Файлы
+`app/services/audit.py`, `app/models/audit.py`, `app/routers/admin.py`,
+`frontend/src/pages/admin/AdminAuditPage.tsx`, `tests/admin/test_audit.py`.
+
+Пример
+```json
+{"action":"token.reveal","actor":"admin:7",
+ "object_id":"tok_123","request_id":"req_..."}
+```
+
+Критерий готовности
+Нельзя открыть полный секрет из audit payload или найти его в истории
+событий; фильтры по actor/action/date работают.
+
+1.5 Статистика пользователей
+Описание
+Собрать активность пользователей: уникальные активные профили за 1/24 часа,
+число активных сессий, login/redeem/refresh/logout counts, самые активные
+профили, число запросов к UI/API по маршрутам, ошибки 4xx/5xx, latency p50/p95
+и использование API-квоты.
+
+Файлы
+`app/services/server_metrics.py`, `app/jobs/metrics_collector.py`,
+`app/routers/admin.py`, `frontend/src/pages/admin/AdminLoadPage.tsx`,
+`tests/admin/test_user_metrics.py`.
+
+Пример
+```text
+Активные профили: 128 за 24 ч
+Активные сессии: 43
+API: 12 840 запросов / 24 ч
+p95 latency: 184 ms
+```
+
+Критерий готовности
+Цифры обновляются с заданным интервалом, не содержат токенов и позволяют
+ответить на вопросы «кто сейчас активен» и «какой endpoint создаёт
+нагрузку».
+
+1.6 Нагрузка poller, БД и Twitch
+Описание
+Показывать число active channels, backlog/next due, cycles, polls, samples,
+deduped samples, upstream latency/error rate, retry/backoff, poller uptime,
+last successful poll, DB pool size/queue time, Redis memory/latency и, если
+доступно, process CPU/RAM. Добавить freshness и alert threshold.
+
+Файлы
+`app/services/server_metrics.py`, `app/services/poller.py`,
+`app/jobs/metrics_collector.py`, `frontend/src/pages/admin/AdminLoadPage.tsx`,
+`tests/admin/test_load_metrics.py`.
+
+Пример
+```json
+{"active_channels":1000,"backlog":0,"poller_uptime":0.999,
+ "twitch_error_rate":0.002,"p95_query_ms":184}
+```
+
+Критерий готовности
+Администратор видит текущую и историческую нагрузку, может отличить медленный
+Twitch от медленной БД и получает warning при backlog/error spike.
+
+
+Шаг 10. CSV/PDF, алерты, Telegram и webhooks
+=====
+
+Назначение и важность
+---------------------
+Добавить экспорт доказательств и автоматические уведомления. Это превращает
+график из интересной картинки в рабочий инструмент: пользователь может
+выгрузить историю, получить отчёт для разбора и узнать об аномалии без
+постоянного открытия dashboard.
+
+Приоритет: P0 (входит в полный релиз)
+
+Затрагиваемые файлы
+--------------------
+- `app/services/reporting.py`
+- `app/services/pdf.py`
+- `app/services/alerts.py`
+- `app/services/telegram.py`
+- `app/services/webhook_delivery.py`
+- `app/routers/exports.py`
+- `app/routers/alerts.py`
+- `app/models/alert.py`
+- `app/models/webhook.py`
+- `frontend/src/pages/ExportPage.tsx`
+- `frontend/src/pages/AlertsPage.tsx`
+- `tests/exports/`
+- `tests/alerts/`
+
+1.1 CSV-экспорт
+Описание
+Экспортировать историю за выбранный период с колонками timestamp, live,
+total, authorized, guests, chat_ratio, score, confidence, source freshness и
+аномалии. Использовать UTF-8 BOM, CRLF и корректное экранирование, чтобы
+файл нормально открывался в Excel.
+
+Файлы
+`app/services/reporting.py`, `app/routers/exports.py`,
+`tests/exports/test_csv.py`.
+
+Пример
+```http
+GET /api/profile/channels/tumblurr/export?format=csv&from=...&to=...
+```
+
+Критерий готовности
+CSV содержит заголовок и выбранный период, кириллица не ломается, а
+secret/Authorization не попадают в файл.
+
+1.2 HTML/PDF-отчёт
+Описание
+Собирать отчёт с шапкой, периодом, KPI, графиком, таблицей аномалий,
+методологией, score breakdown и SHA-256 digest. Для малых отчётов делать
+HTML/PDF synchronously, для больших — async job с уведомлением.
+
+Файлы
+`app/services/pdf.py`, `app/services/reporting.py`,
+`app/jobs/export_jobs.py`, `frontend/src/pages/ExportPage.tsx`.
+
+Пример
+```http
+GET /api/profile/channels/tumblurr/report?format=pdf
+X-Report-SHA256: <digest>
+```
+
+Критерий готовности
+Отчёт воспроизводим, содержит период и методологию, а digest соответствует
+содержимому файла.
+
+1.3 Правила алертов
+Описание
+Добавить in-app правила для viewer_spike, ratio_collapse, score_threshold,
+stream_offline и stale_data. Для каждого правила хранить threshold, window,
+cooldown, channels, enabled и hysteresis; один всплеск не должен порождать
+десятки уведомлений.
+
+Файлы
+`app/services/alerts.py`, `app/models/alert.py`, `app/routers/alerts.py`,
+`frontend/src/pages/AlertsPage.tsx`, `tests/alerts/test_rules.py`.
+
+Пример
+```json
+{"type":"viewer_spike","threshold_pct":300,"window":"5m",
+ "cooldown_seconds":600}
+```
+
+Критерий готовности
+Правило срабатывает при переходе порога, не флапает на границе, а
+событие содержит channel, baseline, observed, window, score и explanation.
+
+1.4 Telegram
+Описание
+Реализовать отправку через Telegram Bot API с `chat_id`, retries на 429 и
+кратким русским текстом. Секрет бота хранить только в secret manager, chat_id
+и статус доставки — в БД.
+
+Файлы
+`app/services/telegram.py`, `app/jobs/notification_worker.py`,
+`app/models/alert.py`, `tests/alerts/test_telegram.py`.
+
+Пример
+```text
+⚠️ Наблюдение: #tumblurr
+Зрители выросли на 330%; чат не отреагировал.
+Score 78 · confidence 0.64
+```
+
+Критерий готовности
+Telegram недоступность не блокирует poller, повтор доставки не создаёт
+дубликаты, а в UI виден статус последней попытки.
+
+1.5 Исходящие webhooks
+Описание
+Поддержать URL, secret, события, test delivery и историю попыток. Подписывать
+событие HMAC по timestamp + raw body, повторять 5xx/429 с backoff, не
+повторять 4xx, запрещать private IP/SSRF и redirects.
+
+Файлы
+`app/services/webhook_delivery.py`, `app/models/webhook.py`,
+`app/routers/webhooks.py`, `tests/alerts/test_webhook_security.py`.
+
+Пример
+```http
+X-TVS-Signature: t=...,v1=<hmac>
+X-TVS-Event: anomaly.detected
+X-TVS-Delivery: evt_...
+```
+
+Критерий готовности
+Клиент может проверить подпись, повторная доставка имеет тот же event id,
+URL `169.254.169.254` и другие private/reserved адреса отклоняются.
+
+1.6 История и UI событий
+Описание
+Показать ленту алертов с фильтрами, непрочитанными, severity, channel и
+датой; дать кнопку «Отправить тест». Администратор должен видеть delivery
+status, response code, latency и число попыток.
+
+Файлы
+`frontend/src/pages/AlertsPage.tsx`, `app/routers/alerts.py`,
+`app/routers/webhooks.py`, `tests/e2e/test_alerts.py`.
+
+Пример
+```text
+Последняя доставка: 200 OK · 142 мс · попытка 1
+```
+
+Критерий готовности
+Ошибка доставки видна и не маскируется как успешная доставка, а событие
+можно безопасно повторить без двойного учёта.
+
+
+Шаг 11. Docker, CI, мониторинг, backup и эксплуатация
+=====
+
+Назначение и важность
+---------------------
+Собрать полноценный production-контур: воспроизводимый запуск, отдельные
+API/poller процессы, миграции PostgreSQL, Redis, HTTPS, health checks,
+backup и наблюдаемость. Админская статистика нагрузки должна опираться на
+реальные метрики этого контура.
+
+Приоритет: P0
+
+Затрагиваемые файлы
+--------------------
+- `docker-compose.yml`
+- `docker-compose.prod.yml`
+- `Dockerfile`
+- `frontend/Dockerfile`
+- `.github/workflows/ci.yml`
+- `scripts/check_postgres.py`
+- `scripts/backup_postgres.py`
+- `scripts/restore_postgres.py`
+- `app/main.py`
+- `app/jobs/health.py`
+- `app/services/logging.py`
+- `docs/runbook.md`
+- `docs/configuration.md`
+
+1.1 Compose-топология
+Описание
+Поднять `postgres`, `redis`, `api`, `poller`, `notification-worker` и
+frontend/reverse-proxy. API не должен запускать poller в том же процессе;
+poller должен переживать рестарт web без потери истории.
+
+Файлы
+`docker-compose.yml`, `docker-compose.prod.yml`, `Dockerfile`,
+`frontend/Dockerfile`, `app/main.py`, `app/jobs/run_poller.py`.
+
+Пример
+```powershell
+docker compose up -d postgres redis
+docker compose run --rm api python -m alembic upgrade head
+docker compose up -d api poller notification-worker
+```
+
+Критерий готовности
+Один `docker compose up` поднимает сервисы в правильном порядке, healthcheck
+ждёт миграции и Redis, а poller имеет отдельный restart policy.
+
+1.2 Secrets и конфигурация
+Описание
+Разделить public config и secrets. В production encryption key, database
+credentials, webhook secrets, bot token и bootstrap admin не хранятся в
+репозитории или image. Поддержать secret manager или зашифрованный env
+файл с ограниченными правами.
+
+Файлы
+`.env.example`, `docs/configuration.md`, `deploy/secrets/`,
+`app/config.py`, `.github/workflows/ci.yml`.
+
+Пример
+```env
+APP_ENV=production
+TOKEN_ENCRYPTION_KEY_FILE=/run/secrets/token_encryption_key
+DATABASE_URL_FILE=/run/secrets/database_url
+```
+
+Критерий готовности
+CI проверяет отсутствие секретов, production отказывается стартовать с
+пустым encryption key, а rotation key задокументирована без потери доступа к
+существующим профилям.
+
+1.3 Миграции, backup и restore
+Описание
+Все изменения схемы оформлять Alembic. Перед release делать backup PostgreSQL,
+после миграции выполнять readiness check. Хранить encryption key отдельно от
+backup-тома и документировать процедуру key rotation.
+
+Файлы
+`migrations/`, `scripts/backup_postgres.py`,
+`scripts/restore_postgres.py`, `docs/runbook.md`.
+
+Пример
+```powershell
+python -m alembic upgrade head
+python scripts/backup_postgres.py --output C:\backups\tvs-2026-09-23.dump
+python scripts/restore_postgres.py --input C:\backups\tvs-2026-09-23.dump
+```
+
+Критерий готовности
+Restore проверен на тестовой БД, миграции идемпотентны, rollback возможен
+без удаления данных.
+
+1.4 Health, logs и server metrics
+Описание
+Реализовать `/healthz`, `/readyz`, `/metrics` для внутреннего мониторинга и
+admin load API. Логи должны быть JSON-структурированными, с request_id,
+route, status, latency, user/profile id без токенов. Собирать uptime, request
+rate, error rate, p50/p95/p99, DB/Redis pool, poller backlog и Twitch errors.
+
+Файлы
+`app/routers/health.py`, `app/services/server_metrics.py`,
+`app/services/logging.py`, `app/jobs/metrics_collector.py`.
+
+Пример
+```json
+{"ts":"2026-09-23T12:00:00Z","route":"/api/profile",
+ "status":200,"latency_ms":43,"profile_id":42,"request_id":"req_..."}
+```
+
+Критерий готовности
+Метрики не содержат секретов, readiness падает при недоступной критической
+БД, а Grafana/внутренний dashboard видят те же цифры, что admin UI.
+
+1.5 CI и supply chain
+Описание
+В CI запускать lint, typecheck, unit, integration на PostgreSQL/Redis,
+migration check, frontend build и security checks. Версии зависимостей
+фиксировать lock-файлами, secrets не передавать в pull request builds.
+
+Файлы
+`.github/workflows/ci.yml`, `pyproject.toml`, `frontend/package-lock.json`,
+`SECURITY.md`.
+
+Пример
+```powershell
+python -m pytest -q
+npm ci
+npm run build
+python -m alembic check
+```
+
+Критерий готовности
+Merge невозможен при падении миграции, тестов или production build; уязвимые
+зависимости и секреты видны отдельным check.
+
+1.6 Runbook и эксплуатационная безопасность
+Описание
+Описать deploy, rollback, key rotation, backup restore, Twitch outage,
+PostgreSQL outage, Redis outage, poller backlog, mass revoke и incident
+communication. Ограничить доступ к production и регулярно проверять restore.
+
+Файлы
+`docs/runbook.md`, `docs/security.md`, `docs/incidents.md`,
+`scripts/check_postgres.py`.
+
+Пример
+```text
+Инцидент: poller backlog > 1000
+1. Проверить Twitch error rate.
+2. Проверить DB/Redis latency.
+3. Остановить только poller, не API.
+4. Восстановить и проверить idempotent aggregates.
+```
+
+Критерий готовности
+Новый дежурный может по runbook безопасно выполнить deploy, rollback и
+восстановление без доступа к исходному коду.
+
+
+Шаг 12. Тестирование, приёмка и релизный чек-лист
+=====
+
+Назначение и важность
+---------------------
+Доказать, что выбранные функции работают вместе, а не только по отдельности.
+Особое внимание: вход по ключу, наследование API-ключей, права на каналы,
+корректность фоновой истории, честность score, безопасность секретов и
+видимость нагрузки сервера.
+
+Приоритет: P0
+
+Затрагиваемые файлы
+--------------------
+- `tests/unit/`
+- `tests/integration/`
+- `tests/security/`
+- `tests/e2e/`
+- `tests/load/`
+- `tests/lifecycle/`
+- `tests/fixtures/`
+- `pytest.ini`
+- `.github/workflows/ci.yml`
+- `docs/acceptance.md`
+- `docs/release-checklist.md`
+
+1.1 Unit и property-тесты
+Описание
+Покрыть генерацию формата, шифрование/hash, срок/revoke, URL-парсер,
+дедупликацию, stream sessions, spike detector, confidence, score weights,
+CSV escaping и расчёт метрик на синтетических рядах. Важны edge cases:
+пустое окно, один sample, одинаковые значения, переход midnight, offline.
+
+Файлы
+`tests/unit/test_tokens.py`, `tests/unit/test_parser.py`,
+`tests/unit/test_observations.py`, `tests/unit/test_scoring.py`,
+`tests/unit/test_exports.py`.
+
+Пример
+```python
+def test_tvs_format_is_prefix_plus_128_chars():
+    assert is_valid_tvs_token(generate_tvs_token())
+```
+
+Критерий готовности
+Каждое бизнес-правило имеет отдельный тест, нет сетевых запросов, тесты
+детерминированы по UTC clock.
+
+1.2 Integration на PostgreSQL и Redis
+Описание
+Проверить реальные миграции, unique constraints, concurrent redeem/revoke,
+parent-child API keys, allowlist/unlimited, retention, poller transactions,
+идемпотентные агрегаты и rate-limit атомарность. SQLite не считать
+эквивалентом PostgreSQL для этих проверок.
+
+Файлы
+`tests/integration/test_migrations.py`,
+`tests/integration/test_concurrency.py`, `tests/integration/test_ratelimit.py`,
+`tests/integration/test_persistence.py`.
+
+Пример
+```powershell
+docker compose -f docker-compose.test.yml up -d
+python -m pytest tests/integration -q
+```
+
+Критерий готовности
+Тесты проходят на чистой PostgreSQL, повторный запуск безопасен, а
+race-условия не оставляют partially committed state.
+
+1.3 Security tests
+Описание
+Проверить отсутствие секретов в URL/logs/Referer, CSRF/Origin, CORS,
+security headers, path traversal, XSS через stream title, admin escalation,
+SSRF webhook, DNS/IP validation, duplicate query parameters, rate-limit bypass
+через X-Forwarded-For и безопасность bootstrap.
+
+Файлы
+`tests/security/test_auth.py`, `tests/security/test_admin.py`,
+`tests/security/test_secrets.py`, `tests/security/test_webhook_ssrf.py`.
+
+Пример
+```python
+response = client.post("/api/profile/channels", json={"text": "<script>"})
+assert response.status_code == 400
+```
+
+Критерий готовности
+Каждый P0/P1 риск имеет автоматический regression test; secret scanner не
+находит реальных значений в репозитории.
+
+1.4 Poller lifecycle и outage tests
+Описание
+Запускать настоящий poller с fake Twitch: автоматическая регистрация канала,
+несколько циклов, dedup, stream transition, channel error/backoff, restart,
+SIGINT/SIGTERM/SIGBREAK и aggregate lookback. Отдельно проверить, что
+последние сохранённые данные остаются видимыми при outage.
+
+Файлы
+`tests/lifecycle/test_poller.py`, `tests/lifecycle/test_shutdown.py`,
+`tests/lifecycle/test_outage.py`.
+
+Пример
+```powershell
+python -m pytest tests/lifecycle -q
+```
+
+Критерий готовности
+Тест находит те же дефекты, которые unit-тесты не видят: потерю данных при
+остановке, запись в чужую БД и некорректное закрытие stream session.
+
+1.5 E2E пользовательского сценария
+Описание
+Пройти браузером: landing → ввод TVS → пустой dashboard → Add modal →
+несколько URL → таблица → график → score breakdown → stale state → API
+key creation → export → logout. Отдельно пройти admin login → token create →
+expiry/allowlist update → reveal/copy → revoke → audit → server load.
+
+Файлы
+`tests/e2e/test_user_journey.py`, `tests/e2e/test_admin_journey.py`,
+`tests/e2e/fixtures/demo_profile.py`.
+
+Пример
+```powershell
+python -m pytest tests/e2e -q --browser chromium
+```
+
+Критерий готовности
+Пользователь не может завершить основной путь только благодаря ручной
+правке localStorage или DevTools, а все видимые статусы соответствуют API.
+
+1.6 Нагрузочные и приёмочные тесты
+Описание
+Проверить redeem burst, 100–1000 каналов, 30 секунд dashboard polling,
+concurrent API reads, export burst, webhook retry storm и admin metrics
+under load. Зафиксировать целевые p95 и error budget, затем проверить
+критерии продукта.
+
+Файлы
+`tests/load/test_redeem.py`, `tests/load/test_api.py`,
+`tests/load/test_poller.py`, `docs/acceptance.md`.
+
+Пример
+```text
+1000 каналов · 60 s poller · 30 s UI refresh
+Цель: p95 API < 300 ms, p95 poller cycle < 55 s, error rate < 1%
+```
+
+Критерий готовности
+Есть измеренный отчёт, а не только «сервер не упал»; bottlenecks и
+выбранные лимиты зафиксированы в документации.
+
+1.7 Приёмочные сценарии и release checklist
+Описание
+Собрать финальную матрицу: все требования пользователя, P0 security,
+восстановление после restart, миграции, backup/restore, docs, demo seed,
+rollback и observability. Пункты без доказательства не закрываются.
+
+Файлы
+`docs/acceptance.md`, `docs/release-checklist.md`,
+`docs/api/`, `README.md`, `.env.example`.
+
+Пример
+```text
+[ ] TVS_ + 128 chars accepted and revoked
+[ ] unlimited profile can add any public channel
+[ ] restricted profile cannot add foreign channel
+[ ] API key dies with parent TVS
+[ ] poller survives Twitch/DB failure
+[ ] CSV/PDF and score explanation generated
+[ ] admin sees user activity and server load
+```
+
+Критерий готовности
+Release checklist закрыт полностью, тесты зелёные на чистом окружении,
+а у пользователя есть demo-профиль и тестовые ключи без production secrets.
+

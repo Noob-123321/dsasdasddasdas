@@ -1,0 +1,163 @@
+Шаг 5. Метрики, аномалии, risk score и confidence
+=====
+
+Назначение и важность
+---------------------
+Превратить сырые наблюдения в честную аналитику, которую можно показать
+пользователю и объяснить в API. Визуальный индекс и качество данных должны
+быть разными числами: ни один из них не должен называться вероятностью
+накрутки.
+
+Приоритет: P0
+
+Затрагиваемые файлы
+--------------------
+- `app/services/aggregates.py`
+- `app/services/spikes.py`
+- `app/services/scoring.py`
+- `app/services/explanations.py`
+- `app/jobs/recompute_metrics.py`
+- `app/models/score_snapshots.py`
+- `app/services/reporting.py`
+- `tests/analytics/`
+- `docs/methodology.md`
+
+1.1 Измеренные и производные величины
+Описание
+Хранить и возвращать `viewer_count` и `chatters_count` как факты.
+`authorized` ограничивать общим числом зрителей, `guests` считать как
+`max(viewers - authorized, 0)`, `chat_ratio` — как `chatters / viewers`.
+Никогда не называть гостей ботами без отдельного доказательства.
+
+Файлы
+`app/services/metrics.py`, `app/schemas/analytics.py`,
+`tests/analytics/test_derived_metrics.py`.
+
+Пример
+```json
+{
+  "total_viewers": 1000,
+  "authorized": 250,
+  "guests": 750,
+  "chat_ratio": 0.25
+}
+```
+
+Критерий готовности
+Производные значения нельзя изменить независимо от фактов, а нулевые и
+неизвестные значения различаются (`null`, а не 0).
+
+1.2 Суточные и временные агрегаты
+Описание
+Считать время в эфире по длительности наблюдённых значений, среднее по
+времени, пик, медиану chat_ratio, число сессий и всплесков. Строить
+5m/1h ряды для графиков, суточные таблицы — для длинных отчётов. Пересчёт
+окна делать идемпотентно с lookback после простоя.
+
+Файлы
+`app/services/aggregates.py`, `app/models/aggregates.py`,
+`app/jobs/recompute_metrics.py`, `tests/analytics/test_aggregates.py`.
+
+Пример
+```text
+stream_seconds = сумма интервалов пересечения с окном
+avg_viewers = взвешенное среднее по длительности
+```
+
+Критерий готовности
+Замер, пересекающий границу суток, учитывается пропорционально; повторный
+пересчёт даёт тот же результат и не создаёт дублей.
+
+1.3 Детектор аномалий
+Описание
+Использовать двойной порог: максимум из `baseline * 1.5` и
+`baseline + 3 * MAD`. Сохранять baseline, MAD, число фоновых замеров и
+правило, которое сработало. Различать `single_point`, `flat_top`, `smooth`
+и `unknown`; для короткого пика не заполнять производные длительности.
+
+Файлы
+`app/services/spikes.py`, `app/models/spike.py`,
+`tests/analytics/test_spikes.py`.
+
+Пример
+```json
+{
+  "type": "viewer_spike",
+  "amplitude": 3.4,
+  "shape": "flat_top",
+  "is_instant": false,
+  "baseline_method": "median_mad",
+  "warnings": []
+}
+```
+
+Критерий готовности
+Плоский ряд не даёт аномалию, короткий пик помечается `is_instant`,
+порог и его объяснение доступны в UI/API/PDF.
+
+1.4 Risk score 0–100
+Описание
+Считать отдельный индекс подозрительной необычности из факторов: низкая
+доля чаттеров, всплеск зрителей без реакции чата, пилообразная динамика и
+последующий category outlier. Пропущенный фактор не штрафуется, его вес
+перераспределяется. Вердикты: green/yellow/red/nd.
+
+Файлы
+`app/services/scoring.py`, `app/models/score_snapshots.py`,
+`tests/analytics/test_scoring.py`, `docs/methodology.md`.
+
+Пример
+```json
+{
+  "risk_score": 72,
+  "verdict": "red",
+  "factors": [
+    {"code": "low_ratio", "value": 0.012, "score": 1.0, "weight": 0.35}
+  ]
+}
+```
+
+Критерий готовности
+Синтетический аномальный ряд даёт более высокий score, ровный ряд — более
+низкий score; сумма активных весов равна единице, а отсутствие данных не
+превращается в уверенный зелёный вердикт.
+
+1.5 Confidence и explanation
+Описание
+Confidence 0–1 считать отдельно через качество данных: coverage, density,
+ratio_stability, spikes, age_trusted и число наблюдений. При confidence ниже
+порога показывать «предварительно»/«н/д». explanation формировать на русском
+и включать окно расчёта, factors, warnings и количество samples.
+
+Файлы
+`app/services/scoring.py`, `app/services/explanations.py`,
+`frontend/src/components/ScoreBreakdown.tsx`, `tests/analytics/test_confidence.py`.
+
+Пример
+```text
+Итог 0.72 при достоверности 0.38.
+Данных мало: оценка предварительная и может измениться.
+```
+
+Критерий готовности
+Каждое число в dashboard и API можно раскрыть до факторов; UI не показывает
+красный вердикт как доказанный факт при низком confidence.
+
+1.6 Периодический пересчёт
+Описание
+Спайки и агрегаты пересчитывать после каждого цикла с lookback 2 часа;
+score_snapshot записывать не чаще раза в 6 часов. Старую score-историю не
+перезаписывать, а новые вычисления делать идемпотентными.
+
+Файлы
+`app/jobs/recompute_metrics.py`, `app/services/poller.py`,
+`tests/analytics/test_idempotency.py`.
+
+Пример
+```python
+recompute_metrics(login, since=now - timedelta(hours=2), now=now)
+```
+
+Критерий готовности
+Перезапуск poller не создаёт тысячи одинаковых score-строк, а latest score
+для портфеля читается одним запросом.

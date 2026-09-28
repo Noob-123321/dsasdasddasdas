@@ -1,0 +1,128 @@
+Шаг 1. Инвентаризация текущего проекта и целевой каркас
+=====
+
+Назначение и важность
+---------------------
+Перед изменением архитектуры зафиксировать реальное состояние
+`C:\Users\Artem\Downloads\pro\twitch`, отделить рабочий прототип от идей из
+двух референсных проектов и зафиксировать границы миграции. Код из
+`C:\Users\Artem\Downloads\twitch` и
+`C:\Users\Artem\Downloads\Telegram Desktop\twitch\twitch` не копируется;
+переиспользуются только проверенные идеи, схемы и правила.
+
+Приоритет: P0
+
+Затрагиваемые файлы
+--------------------
+- `C:\Users\Artem\Downloads\pro\twitch\README.md`
+- `C:\Users\Artem\Downloads\pro\twitch\src\server.py`
+- `C:\Users\Artem\Downloads\pro\twitch\src\twitch_gql_client.py`
+- `C:\Users\Artem\Downloads\pro\twitch\public\`
+- `C:\Users\Artem\Downloads\pro\twitch\tests\`
+- новые `app/`, `frontend/`, `docs/`, `migrations/`, `tests/`
+- новые `Dockerfile`, `docker-compose.yml`, `pyproject.toml`, `.env.example`
+
+1.1 Инвентаризация текущего состояния
+Описание
+Провести read-only аудит текущего прототипа: stdlib HTTP-сервер, JSON-хранилище
+подписок, один канал, покупка подписки, простой live-отчёт и фронтенд без
+аккаунтов/ролей/истории. Составить список функций, которые можно сохранить
+как адаптеры, и список функций, которые нужно заменить.
+
+Файлы
+`src/server.py`, `src/subscriptions.py`, `src/payments.py`,
+`src/twitch_gql_client.py`, `public/app.js`, `public/index.html`,
+`README.md`.
+
+Пример
+```powershell
+Get-ChildItem -Recurse -File C:\Users\Artem\Downloads\pro\twitch
+python -m compileall -q C:\Users\Artem\Downloads\pro\twitch\src
+```
+
+Критерий готовности
+Есть таблица «сохранить / переписать / исключить», нет скрытых зависимостей
+на JSON-файл подписок или детерминированный `TVS-НИК`.
+
+1.2 Целевая структура
+Описание
+Разделить код на backend, frontend, миграции, poller, документацию и тесты.
+Backend не должен читать `public/` как единственный источник логики;
+poller и web API должны использовать общие сервисы.
+
+Файлы
+`app/main.py`, `app/config.py`, `app/db.py`, `app/models/`,
+`app/services/`, `app/routers/`, `frontend/src/`, `docs/`, `migrations/`.
+
+Пример
+```text
+project/
+  app/
+    main.py
+    config.py
+    db.py
+    models/
+    schemas/
+    routers/
+    services/
+    security/
+  frontend/
+    src/
+  migrations/
+  docs/
+  tests/
+  tools/
+```
+
+Критерий готовности
+Новый backend запускается независимо от `src/server.py`, а все маршруты,
+модели и фоновые задачи имеют определённое место в структуре.
+
+1.3 Конфигурация и режимы
+Описание
+Разделить `APP_ENV`, `DATABASE_URL`, `REDIS_URL`, `TOKEN_ENCRYPTION_KEY`,
+`PUBLIC_BASE_URL`, `TWITCH_SOURCE`, polling interval, batch size,
+`ALLOWED_ORIGINS`, `TRUSTED_PROXIES` и лимиты. В development можно
+использовать локальные контейнеры, в production — только явные secrets.
+
+Файлы
+`app/config.py`, `.env.example`, `docker-compose.yml`, `pyproject.toml`,
+`README.md`, `docs/configuration.md`.
+
+Пример
+```env
+APP_ENV=production
+DATABASE_URL=postgresql+psycopg://...
+REDIS_URL=redis://redis:6379/0
+TOKEN_ENCRYPTION_KEY=<secret-manager-reference>
+PUBLIC_BASE_URL=https://tvs.example.com
+TWITCH_SOURCE=gql
+POLL_INTERVAL_SECONDS=60
+POLL_BATCH=200
+```
+
+Критерий готовности
+Приложение стартует с явной ошибкой, если в production отсутствуют
+`DATABASE_URL`, encryption key, HTTPS origin или миграции; секреты не имеют
+значений из репозитория.
+
+1.4 Стратегия перехода
+Описание
+Не делать одновременный rewrite. Сначала добавить новый FastAPI-каркас и
+контракты, затем перенести адаптер Twitch, потом poller и API, после этого
+переключить frontend. Старый `src/` оставить reference до зелёного
+приёмочного прогона.
+
+Файлы
+`app/`, `src/`, `frontend/`, `scripts/migrate_legacy.py`,
+`docs/migration.md`, `tests/test_migration.py`.
+
+Пример
+```powershell
+python -m pytest tests/test_migration.py -q
+python -m app.cli migrate
+```
+
+Критерий готовности
+На каждом этапе есть rollback-команда, миграция идемпотентна, а прототипи
+и новый сервис не пишут в одну неподконтрольную рабочую базу.

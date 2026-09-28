@@ -1,0 +1,41 @@
+name: CI
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_DB: tvs_test
+          POSTGRES_USER: tvs
+          POSTGRES_PASSWORD: tvs
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U tvs -d tvs_test"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - run: pip install -r requirements-dev.txt
+      - run: python -m compileall -q app src tests
+      - run: ruff check app
+      - run: python -m pytest -q
+      - run: node --check public/app.js
+      - run: python -m alembic upgrade head
+        env:
+          DATABASE_URL: postgresql+psycopg://tvs:tvs@localhost:5432/tvs_test
+          TOKEN_ENCRYPTION_KEY: test-encryption-key
+          POLLER_ENABLED: '0'

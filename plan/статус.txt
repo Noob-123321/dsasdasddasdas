@@ -1,0 +1,106 @@
+# Статус реализации
+
+Обновлено: 24.09.2026
+
+## Реализовано в рабочем проекте
+
+- [x] FastAPI application, lifespan, static SPA и security middleware.
+- [x] TVS-ключи `TVS_` + 128 случайных символов, шифрование секрета, hash lookup, expiry/revoke.
+- [x] HttpOnly session redeem/logout/me flow.
+- [x] Первичный admin key и admin-only bootstrap.
+- [x] Профиль с unlimited/allowlist политикой.
+- [x] Массовое добавление Twitch URL/логинов через whitespace parser.
+- [x] Фоновый poller, demo/GQL Twitch adapter, initial snapshot, retry state.
+- [x] Change-aware deduplication viewers/chatters, stream fields, 5m/1h aggregates.
+- [x] Derived metrics, spike detector, risk score, confidence, explanation.
+- [x] Portfolio overview and channel detail/history/anomalies.
+- [x] CSV export and dependency-free HTML/PDF report with SHA-256 digest.
+- [x] Child `tvs_` API keys with parent inheritance and revoke.
+- [x] API v1 snapshot/history/anomalies/summary/portfolio/batch.
+- [x] Alerts CRUD and in-app event feed.
+- [x] Webhook registration, private-address rejection, HMAC test delivery, Telegram/webhook delivery hooks.
+- [x] Admin tokens, reveal/copy, expiry/policy editing, audit log.
+- [x] Admin load page with requests, latency, sessions, profiles, channels, API keys and poller state.
+- [x] OpenAPI `/docs`, `/redoc`, `/openapi.json`.
+- [x] Alembic initial revision, Docker Compose services, CI workflow, runbook and acceptance docs.
+- [x] Probe scripts, retention cleanup, Telegram/webhook delivery hooks.
+- [x] Admin-only navigation guard prevents profile endpoints from being called with an admin key.
+- [x] Same-origin/proxy validation supports `PUBLIC_BASE_URL` and tunnel hosts.
+- [x] Dynamic modal close buttons work, including the admin key “Готово” action.
+- [x] Per-channel sparklines, channel links, chat-history line and approximate axis values.
+- [x] Separate portfolio/history views with channel picker, ranges and observation table.
+- [x] Fixed history layout overflow, offline chart artifacts, capped chat ratio, red risk flag and detailed explainable report.
+- [x] Russian alert guide, translated rule/event labels and API-key list refresh after creation.
+- [x] Admin token revoke hides archived rows by default, supports audited rotation for legacy secrets, and includes request/status/poller charts.
+- [x] Portfolio filters, status colors, custom scrollbars, empty-state add action and CSV/PDF download links are wired.
+- [x] Real GQL client-ID/query corrected; offline Twitch channels now resolve as offline.
+- [x] Demo data is clearly marked and disabled by default; synthetic observations were archived/cleared from the local database.
+- [x] Direct SPA routes `/dashboard`, `/history`, `/admin`, `/api-docs` render without validation errors.
+- [x] Access-token foreign keys use string IDs; Alembic revision 0003 aligns PostgreSQL schema.
+- [x] `stale_data` alerts evaluate after a real failed poll; API usage counters persist.
+- [x] Restricted profile policy applies to existing portfolio reads; expiry can be cleared by admin.
+- [x] Compose runs collection only in the dedicated poller and forces secure production cookies; `.dockerignore` excludes secrets/local DBs.
+- [x] History channel picker supports mouse-wheel and Shift+wheel horizontal scrolling without shrinking cards.
+- [x] CSV/PDF use authenticated client-side blob downloads with visible success/error feedback.
+- [x] Webhook secrets are encrypted and no longer echoed in the create response.
+- [x] Sync timestamp is shown on portfolio, history, alerts, API and settings views.
+- [x] Windows/Linux operations wrappers include an audited local main-admin key reveal command.
+- [x] Charts downsample to a dot grid (30 points in portfolio, 40 in history) with a hover tooltip showing time, viewers and chatters.
+- [x] Sidebar navigation keeps the correct active highlight after visiting alerts, API, settings and returning to portfolio/history.
+- [x] Product rebranded to TVS (Twitch Viewers System): UI, title, favicon/logo monogram, generated keys `TVS_`/`tvs_`, files and docs. Legacy `TVB_`/`tvb_` keys and DB file keep working.
+- [x] Language switcher (RU / EN) with instant reactivity across all screens, persistent in localStorage.
+- [x] CSV export configured with semicolon delimiter (`;`), UTF-8 BOM, and standard quoting so Excel opens every field in its own column automatically.
+- [x] PDF export verified: generates valid, parseable PDF-1.4 documents without encoding errors or missing text.
+- [x] Handled external OpenAI-compatible probes (`GET /v1/models` and `/v1/chat/completions`) with a structured JSON 404 response to suppress noisy console warnings.
+- [x] Operations wrappers and helper renamed to `tvs.bat`, `tvs.sh`, `scripts/tvs.py`.
+- [x] Full functional plan and verification matrix: `plan/функционал_и_проверка.txt`.
+- [x] Russian/English UI toggle added across all pages: login, portfolio, history, alerts, API/webhooks, settings, admin panel, modals.
+- [x] Fixed blank page: i18n helper was defined as `tr` while 347 call sites used `t()` — renamed the definition.
+- [x] Fixed `icons` declared as a function but used as an object (logout button showed "undefined").
+- [x] Implemented missing `adminBarChart`; the admin "Load" tab crashed before.
+- [x] Dictionaries completed and symmetric: 304 RU / 304 EN keys, all 278 referenced keys resolve.
+- [x] Fixed CSS grid for admin bar chart (inline spans had no width).
+- [x] Static assets now served with `Cache-Control: no-cache, must-revalidate` so edits appear on reload.
+- [x] Split shared `portfolio_empty` key into `portfolio_title` / `portfolio_subtitle`; fixed mixed-case chart title.
+- [x] Verified in a real browser: login, all 5 profile views, all 4 admin tabs, RU/EN switching, channel add, no console errors.
+- [x] Added RU/EN dictionary with 150+ translation keys; all user-facing strings wrapped in `t()` helper.
+- [x] Fixed double `shell()` call in `loadApiPage`.
+- [x] Configured ruff per-file-ignores for test E402.
+- [x] Russian/English UI toggle added, including the Russian alert guide translated to English on demand.
+- [x] Score snapshot now refreshes on every poll; confidence reflects current sample count.
+- [x] Aggregate bucket uniqueness migration prevents poller `UNIQUE constraint` failures.
+- [x] Swagger UI CSP exception keeps `/docs` and `/redoc` interactive.
+- [x] Unit/smoke tests and browser-tested responsive UI.
+
+## Проверки
+
+- `python -m compileall -q app src tests` — passed.
+- `node --check public/app.js` — passed.
+- `python -m pytest -q` — 35 passed (13 FastAPI + 22 legacy).
+- `ruff check app` — passed.
+- `python -m alembic upgrade head` — passed on a fresh SQLite database.
+- Browser QA: login, admin token creation, profile login, bulk channel add,
+  live demo values, chart, API key creation, alerts, admin tabs, CSV/PDF blob
+  downloads, history wheel/Shift+wheel, sync timestamps and 360/768/1440
+  viewport checks passed; no current browser console errors.
+- Integration smoke matrix: 45 checks passed, including parent-revoke inheritance.
+- Redis is configured for deployment, but the current rate limiter remains process-local until shared-backend integration.
+
+## Оставшиеся production-dependent items
+
+- PostgreSQL/Redis Docker stack не запускался на этой Windows-машине: Docker CLI
+  не установлен. Compose-файлы и миграции присутствуют, но полный PG integration
+  прогон нужно выполнить в окружении с Docker.
+- Initial migration использует `Base.metadata.create_all`; schema history нужно
+  пересмотреть перед production.
+- PostgreSQL FK migration 0003 проверен только на fresh SQLite; реальный PG
+  прогон обязателен перед production.
+- Webhook SSRF hardening (DNS/redirect/egress), API scope/quota enforcement,
+  delivery history и полноценная stream-session model остаются backlog.
+- Реальный `TWITCH_SOURCE=gql` проверен на публичных live/offline каналах;
+  адаптер может измениться при отзыве/изменении Twitch CommunityTab.
+- Telegram delivery и production webhook retries подключены как backend
+  contracts; локальный smoke test проверяет in-app alert path и webhook
+  registration/security, но не реальный внешний endpoint.
+- Для production нужно задать `COOKIE_SECURE=1`, HTTPS reverse proxy и
+  secret-manager values.

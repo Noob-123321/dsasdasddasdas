@@ -1,0 +1,807 @@
+{
+  "data": {
+    "users": [
+      {
+        "id": "900000000",
+        "login": "sampler000",
+        "createdAt": "2025-08-27T12:00:00",
+        "followers": {
+          "totalCount": 174
+        }
+      },
+      {
+        "id": "900000001",
+        "login": "sampler001",
+        "createdAt": "2024-10-24T12:00:00",
+        "followers": {
+          "totalCount": 83
+        }
+      },
+      {
+        "id": "900000002",
+        "login": "sampler002",
+        "createdAt": "2024-06-07T12:00:00",
+        "followers": {
+          "totalCount": 0
+        }
+      },
+      {
+        "id": "900000003",
+        "login": "sampler003",
+        "createdAt": "2024-04-18T12:00:00",
+        "followers": {
+          "totalCount": 0
+        }
+      },
+      {
+        "id": "900000004",
+        "login": "sampler004",
+        "createdAt": "2023-01-07T12:00:00",
+        "followers": {
+          "totalCount": 0
+        }
+      },
+      {
+        "id": "900000005",
+        "login": "sampler005",
+        "createdAt": "2022-02-16T12:00:00",
+        "followers": {
+          "totalCount": 0
+        }
+      },
+      {
+        "id": "900000006",
+        "login": "sampler006",
+        "createdAt": "2022-01-10T12:00:00",
+        "followers": {
+          "totalCount": 0
+        }
+      },
+      {
+        "id": "900000007",
+        "login": "sampler007",
+        "createdAt": "2021-12-04T12:00:00",
+        "followers": {
+          "totalCount": 0
+        }
+      },
+      {
+        "id": "900000008",
+        "login": "sampler008",
+        "createdAt": "2021-10-28T12:00:00",
+        "followers": {
+          "totalCount": 0
+        }
+      },
+      {
+        "id": "900000009",
+        "login": "sampler009",
+        "createdAt": "2021-09-21T12:00:00",
+        "followers": {
+          "totalCount": 0
+        }
+      },
+      {
+        "id": "900000010",
+        "login": "sampler010",
+        "createdAt": "2021-08-15T12:00:00",
+        "followers": {
+          "totalCount": 0
+        }
+      },
+      {
+        "id": "900000011",
+        "login": "sampler011",
+        "createdAt": "2021-07-09T12:00:00",
+        "followers": {
+          "totalCount": 0
+        }
+      },
+      {
+        "id": "900000012",
+        "login": "sampler012",
+        "createdAt": "2021-06-02T12:00:00",
+        "followers": {
+          "totalCount": 0
+        }
+      },
+      {
+        "id": "900000013",
+        "login": "sampler013",
+        "createdAt": "2021-04-26T12:00:00",
+        "followers": {
+          "totalCount": 0
+        }
+      },
+      {
+        "id": "900000014",
+        "login": "sampler014",
+        "createdAt": "2021-03-20T12:00:00",
+        "followers": {
+          "totalCount": 0
+        }
+      },
+      {
+        "id": "900000015",
+        "login": "sampler015",
+        "createdAt": "2021-02-11T12:00:00",
+        "followers": {
+          "totalCount": 0
+        }
+      },
+      {
+        "id": "900000016",
+        "login": "sampler016",
+        "createdAt": "2021-01-05T12:00:00",
+        "followers": {
+          "totalCount": 0
+        }
+      },
+      {
+        "id": "900000017",
+        "login": "sampler017",
+        "createdAt": "2020-11-29T12:00:00",
+        "followers": {
+          "totalCount": 0
+        }
+      },
+      {
+        "id": "900000018",
+        "login": "sampler018",
+        "createdAt": "2020-10-23T12:00:00",
+        "followers": {
+          "totalCount": 0
+        }
+      },
+      {
+        "id": "900000019",
+        "login": "sampler019",
+        "createdAt": "2020-09-16T12:00:00",
+        "followers": {
+          "totalCount": 91
+        }
+      },
+      {
+        "id": "900000020",
+        "login": "sampler020",
+        "createdAt": "2020-08-10T12:00:00",
+        "followers": {
+          "totalCount": 210
+        }
+      },
+      {
+        "id": "900000021",
+        "login": "sampler021",
+        "createdAt": "2020-07-04T12:00:00",
+        "followers": {
+          "totalCount": 640
+        }
+      },
+      {
+        "id": "900000022",
+        "login": "sampler022",
+        "createdAt": "2020-05-28T12:00:00",
+        "followers": {
+          "totalCount": 470
+        }
+      },
+      {
+        "id": "900000023",
+        "login": "sampler023",
+        "createdAt": "2020-04-21T12:00:00",
+        "followers": {
+          "totalCount": 18
+        }
+      },
+      {
+        "id": "900000024",
+        "login": "sampler024",
+        "createdAt": "2020-03-15T12:00:00",
+        "followers": {
+          "totalCount": 7
+        }
+      },
+      {
+        "id": "900000025",
+        "login": "sampler025",
+        "createdAt": "2020-02-07T12:00:00",
+        "followers": {
+          "totalCount": 55
+        }
+      },
+      {
+        "id": "900000026",
+        "login": "sampler026",
+        "createdAt": "2020-01-01T12:00:00",
+        "followers": {
+          "totalCount": 91
+        }
+      },
+      {
+        "id": "900000027",
+        "login": "sampler027",
+        "createdAt": "2019-11-25T12:00:00",
+        "followers": {
+          "totalCount": 470
+        }
+      },
+      {
+        "id": "900000028",
+        "login": "sampler028",
+        "createdAt": "2019-10-19T12:00:00",
+        "followers": {
+          "totalCount": 7
+        }
+      },
+      {
+        "id": "900000029",
+        "login": "sampler029",
+        "createdAt": "2019-09-12T12:00:00",
+        "followers": {
+          "totalCount": 55
+        }
+      },
+      {
+        "id": "900000030",
+        "login": "sampler030",
+        "createdAt": "2019-08-06T12:00:00",
+        "followers": {
+          "totalCount": 305
+        }
+      },
+      {
+        "id": "900000031",
+        "login": "sampler031",
+        "createdAt": "2019-06-30T12:00:00",
+        "followers": {
+          "totalCount": 640
+        }
+      },
+      {
+        "id": "900000032",
+        "login": "sampler032",
+        "createdAt": "2019-05-24T12:00:00",
+        "followers": {
+          "totalCount": 91
+        }
+      },
+      {
+        "id": "900000033",
+        "login": "sampler033",
+        "createdAt": "2019-04-17T12:00:00",
+        "followers": {
+          "totalCount": 140
+        }
+      },
+      {
+        "id": "900000034",
+        "login": "sampler034",
+        "createdAt": "2019-03-11T12:00:00",
+        "followers": {
+          "totalCount": 33
+        }
+      },
+      {
+        "id": "900000035",
+        "login": "sampler035",
+        "createdAt": "2019-02-02T12:00:00",
+        "followers": {
+          "totalCount": 640
+        }
+      },
+      {
+        "id": "900000036",
+        "login": "sampler036",
+        "createdAt": "2018-12-27T12:00:00",
+        "followers": {
+          "totalCount": 55
+        }
+      },
+      {
+        "id": "900000037",
+        "login": "sampler037",
+        "createdAt": "2018-11-20T12:00:00",
+        "followers": {
+          "totalCount": 33
+        }
+      },
+      {
+        "id": "900000038",
+        "login": "sampler038",
+        "createdAt": "2018-10-14T12:00:00",
+        "followers": {
+          "totalCount": 55
+        }
+      },
+      {
+        "id": "900000039",
+        "login": "sampler039",
+        "createdAt": "2018-09-07T12:00:00",
+        "followers": {
+          "totalCount": 18
+        }
+      },
+      {
+        "id": "900000040",
+        "login": "sampler040",
+        "createdAt": "2018-08-01T12:00:00",
+        "followers": {
+          "totalCount": 55
+        }
+      },
+      {
+        "id": "900000041",
+        "login": "sampler041",
+        "createdAt": "2018-06-25T12:00:00",
+        "followers": {
+          "totalCount": 33
+        }
+      },
+      {
+        "id": "900000042",
+        "login": "sampler042",
+        "createdAt": "2018-05-19T12:00:00",
+        "followers": {
+          "totalCount": 140
+        }
+      },
+      {
+        "id": "900000043",
+        "login": "sampler043",
+        "createdAt": "2018-04-12T12:00:00",
+        "followers": {
+          "totalCount": 91
+        }
+      },
+      {
+        "id": "900000044",
+        "login": "sampler044",
+        "createdAt": "2018-03-06T12:00:00",
+        "followers": {
+          "totalCount": 210
+        }
+      },
+      {
+        "id": "900000045",
+        "login": "sampler045",
+        "createdAt": "2018-01-28T12:00:00",
+        "followers": {
+          "totalCount": 7
+        }
+      },
+      {
+        "id": "900000046",
+        "login": "sampler046",
+        "createdAt": "2017-12-22T12:00:00",
+        "followers": {
+          "totalCount": 7
+        }
+      },
+      {
+        "id": "900000047",
+        "login": "sampler047",
+        "createdAt": "2017-11-15T12:00:00",
+        "followers": {
+          "totalCount": 140
+        }
+      },
+      {
+        "id": "900000048",
+        "login": "sampler048",
+        "createdAt": "2017-10-09T12:00:00",
+        "followers": {
+          "totalCount": 470
+        }
+      },
+      {
+        "id": "900000049",
+        "login": "sampler049",
+        "createdAt": "2017-09-02T12:00:00",
+        "followers": {
+          "totalCount": 640
+        }
+      },
+      {
+        "id": "900000050",
+        "login": "sampler050",
+        "createdAt": "2017-07-27T12:00:00",
+        "followers": {
+          "totalCount": 7
+        }
+      },
+      {
+        "id": "900000051",
+        "login": "sampler051",
+        "createdAt": "2017-06-20T12:00:00",
+        "followers": {
+          "totalCount": 55
+        }
+      },
+      {
+        "id": "900000052",
+        "login": "sampler052",
+        "createdAt": "2017-05-14T12:00:00",
+        "followers": {
+          "totalCount": 640
+        }
+      },
+      {
+        "id": "900000053",
+        "login": "sampler053",
+        "createdAt": "2017-04-07T12:00:00",
+        "followers": {
+          "totalCount": 55
+        }
+      },
+      {
+        "id": "900000054",
+        "login": "sampler054",
+        "createdAt": "2017-03-01T12:00:00",
+        "followers": {
+          "totalCount": 7
+        }
+      },
+      {
+        "id": "900000055",
+        "login": "sampler055",
+        "createdAt": "2017-01-23T12:00:00",
+        "followers": {
+          "totalCount": 640
+        }
+      },
+      {
+        "id": "900000056",
+        "login": "sampler056",
+        "createdAt": "2016-12-17T12:00:00",
+        "followers": {
+          "totalCount": 305
+        }
+      },
+      {
+        "id": "900000057",
+        "login": "sampler057",
+        "createdAt": "2016-11-10T12:00:00",
+        "followers": {
+          "totalCount": 640
+        }
+      },
+      {
+        "id": "900000058",
+        "login": "sampler058",
+        "createdAt": "2016-10-04T12:00:00",
+        "followers": {
+          "totalCount": 210
+        }
+      },
+      {
+        "id": "900000059",
+        "login": "sampler059",
+        "createdAt": "2016-08-28T12:00:00",
+        "followers": {
+          "totalCount": 210
+        }
+      },
+      {
+        "id": "900000060",
+        "login": "sampler060",
+        "createdAt": "2016-07-22T12:00:00",
+        "followers": {
+          "totalCount": 7
+        }
+      },
+      {
+        "id": "900000061",
+        "login": "sampler061",
+        "createdAt": "2016-06-15T12:00:00",
+        "followers": {
+          "totalCount": 18
+        }
+      },
+      {
+        "id": "900000062",
+        "login": "sampler062",
+        "createdAt": "2016-05-09T12:00:00",
+        "followers": {
+          "totalCount": 140
+        }
+      },
+      {
+        "id": "900000063",
+        "login": "sampler063",
+        "createdAt": "2016-04-02T12:00:00",
+        "followers": {
+          "totalCount": 140
+        }
+      },
+      {
+        "id": "900000064",
+        "login": "sampler064",
+        "createdAt": "2016-02-25T12:00:00",
+        "followers": {
+          "totalCount": 33
+        }
+      },
+      {
+        "id": "900000065",
+        "login": "sampler065",
+        "createdAt": "2016-01-19T12:00:00",
+        "followers": {
+          "totalCount": 640
+        }
+      },
+      {
+        "id": "900000066",
+        "login": "sampler066",
+        "createdAt": "2015-12-13T12:00:00",
+        "followers": {
+          "totalCount": 33
+        }
+      },
+      {
+        "id": "900000067",
+        "login": "sampler067",
+        "createdAt": "2015-11-06T12:00:00",
+        "followers": {
+          "totalCount": 18
+        }
+      },
+      {
+        "id": "900000068",
+        "login": "sampler068",
+        "createdAt": "2015-09-30T12:00:00",
+        "followers": {
+          "totalCount": 18
+        }
+      },
+      {
+        "id": "900000069",
+        "login": "sampler069",
+        "createdAt": "2015-08-24T12:00:00",
+        "followers": {
+          "totalCount": 470
+        }
+      },
+      {
+        "id": "900000070",
+        "login": "sampler070",
+        "createdAt": "2015-07-18T12:00:00",
+        "followers": {
+          "totalCount": 470
+        }
+      },
+      {
+        "id": "900000071",
+        "login": "sampler071",
+        "createdAt": "2015-06-11T12:00:00",
+        "followers": {
+          "totalCount": 140
+        }
+      },
+      {
+        "id": "900000072",
+        "login": "sampler072",
+        "createdAt": "2015-05-05T12:00:00",
+        "followers": {
+          "totalCount": 140
+        }
+      },
+      {
+        "id": "900000073",
+        "login": "sampler073",
+        "createdAt": "2015-03-29T12:00:00",
+        "followers": {
+          "totalCount": 18
+        }
+      },
+      {
+        "id": "900000074",
+        "login": "sampler074",
+        "createdAt": "2015-02-20T12:00:00",
+        "followers": {
+          "totalCount": 18
+        }
+      },
+      {
+        "id": "900000075",
+        "login": "sampler075",
+        "createdAt": "2015-01-14T12:00:00",
+        "followers": {
+          "totalCount": 470
+        }
+      },
+      {
+        "id": "900000076",
+        "login": "sampler076",
+        "createdAt": "2014-12-08T12:00:00",
+        "followers": {
+          "totalCount": 470
+        }
+      },
+      {
+        "id": "900000077",
+        "login": "sampler077",
+        "createdAt": "2014-11-01T12:00:00",
+        "followers": {
+          "totalCount": 55
+        }
+      },
+      {
+        "id": "900000078",
+        "login": "sampler078",
+        "createdAt": "2014-09-25T12:00:00",
+        "followers": {
+          "totalCount": 470
+        }
+      },
+      {
+        "id": "900000079",
+        "login": "sampler079",
+        "createdAt": "2014-08-19T12:00:00",
+        "followers": {
+          "totalCount": 7
+        }
+      },
+      {
+        "id": "900000080",
+        "login": "sampler080",
+        "createdAt": "2014-07-13T12:00:00",
+        "followers": {
+          "totalCount": 91
+        }
+      },
+      {
+        "id": "900000081",
+        "login": "sampler081",
+        "createdAt": "2014-06-06T12:00:00",
+        "followers": {
+          "totalCount": 33
+        }
+      },
+      {
+        "id": "900000082",
+        "login": "sampler082",
+        "createdAt": "2014-04-30T12:00:00",
+        "followers": {
+          "totalCount": 18
+        }
+      },
+      {
+        "id": "900000083",
+        "login": "sampler083",
+        "createdAt": "2014-03-24T12:00:00",
+        "followers": {
+          "totalCount": 640
+        }
+      },
+      {
+        "id": "900000084",
+        "login": "sampler084",
+        "createdAt": "2014-02-15T12:00:00",
+        "followers": {
+          "totalCount": 470
+        }
+      },
+      {
+        "id": "900000085",
+        "login": "sampler085",
+        "createdAt": "2014-01-09T12:00:00",
+        "followers": {
+          "totalCount": 305
+        }
+      },
+      {
+        "id": "900000086",
+        "login": "sampler086",
+        "createdAt": "2013-12-03T12:00:00",
+        "followers": {
+          "totalCount": 7
+        }
+      },
+      {
+        "id": "900000087",
+        "login": "sampler087",
+        "createdAt": "2013-10-27T12:00:00",
+        "followers": {
+          "totalCount": 470
+        }
+      },
+      {
+        "id": "900000088",
+        "login": "sampler088",
+        "createdAt": "2013-09-20T12:00:00",
+        "followers": {
+          "totalCount": 33
+        }
+      },
+      {
+        "id": "900000089",
+        "login": "sampler089",
+        "createdAt": "2013-08-14T12:00:00",
+        "followers": {
+          "totalCount": 140
+        }
+      },
+      {
+        "id": "900000090",
+        "login": "sampler090",
+        "createdAt": "2013-07-08T12:00:00",
+        "followers": {
+          "totalCount": 640
+        }
+      },
+      {
+        "id": "900000091",
+        "login": "sampler091",
+        "createdAt": "2013-06-01T12:00:00",
+        "followers": {
+          "totalCount": 18
+        }
+      },
+      {
+        "id": "900000092",
+        "login": "sampler092",
+        "createdAt": "2013-04-25T12:00:00",
+        "followers": {
+          "totalCount": 33
+        }
+      },
+      {
+        "id": "900000093",
+        "login": "sampler093",
+        "createdAt": "2013-03-19T12:00:00",
+        "followers": {
+          "totalCount": 470
+        }
+      },
+      {
+        "id": "900000094",
+        "login": "sampler094",
+        "createdAt": "2013-02-10T12:00:00",
+        "followers": {
+          "totalCount": 640
+        }
+      },
+      {
+        "id": "900000095",
+        "login": "sampler095",
+        "createdAt": null,
+        "followers": null
+      },
+      {
+        "id": "900000096",
+        "login": "sampler096",
+        "createdAt": null,
+        "followers": null
+      },
+      {
+        "id": "900000097",
+        "login": "sampler097",
+        "createdAt": null,
+        "followers": null
+      },
+      {
+        "id": "900000098",
+        "login": "sampler098",
+        "createdAt": null,
+        "followers": null
+      },
+      {
+        "id": "900000099",
+        "login": "sampler099",
+        "createdAt": null,
+        "followers": null
+      },
+      {
+        "id": "825281278",
+        "login": "130H_",
+        "createdAt": "2022-09-14T12:59:26.107271+00:00",
+        "followers": {
+          "totalCount": 894
+        },
+        "lastBroadcast": {
+          "startedAt": "2026-08-12T00:12:19.491441+00:00"
+        }
+      }
+    ]
+  }
+}

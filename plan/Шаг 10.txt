@@ -1,0 +1,149 @@
+Шаг 10. CSV/PDF, алерты, Telegram и webhooks
+=====
+
+Назначение и важность
+---------------------
+Добавить экспорт доказательств и автоматические уведомления. Это превращает
+график из интересной картинки в рабочий инструмент: пользователь может
+выгрузить историю, получить отчёт для разбора и узнать об аномалии без
+постоянного открытия dashboard.
+
+Приоритет: P0 (входит в полный релиз)
+
+Затрагиваемые файлы
+--------------------
+- `app/services/reporting.py`
+- `app/services/pdf.py`
+- `app/services/alerts.py`
+- `app/services/telegram.py`
+- `app/services/webhook_delivery.py`
+- `app/routers/exports.py`
+- `app/routers/alerts.py`
+- `app/models/alert.py`
+- `app/models/webhook.py`
+- `frontend/src/pages/ExportPage.tsx`
+- `frontend/src/pages/AlertsPage.tsx`
+- `tests/exports/`
+- `tests/alerts/`
+
+1.1 CSV-экспорт
+Описание
+Экспортировать историю за выбранный период с колонками timestamp, live,
+total, authorized, guests, chat_ratio, score, confidence, source freshness и
+аномалии. Использовать UTF-8 BOM, CRLF и корректное экранирование, чтобы
+файл нормально открывался в Excel.
+
+Файлы
+`app/services/reporting.py`, `app/routers/exports.py`,
+`tests/exports/test_csv.py`.
+
+Пример
+```http
+GET /api/profile/channels/tumblurr/export?format=csv&from=...&to=...
+```
+
+Критерий готовности
+CSV содержит заголовок и выбранный период, кириллица не ломается, а
+secret/Authorization не попадают в файл.
+
+1.2 HTML/PDF-отчёт
+Описание
+Собирать отчёт с шапкой, периодом, KPI, графиком, таблицей аномалий,
+методологией, score breakdown и SHA-256 digest. Для малых отчётов делать
+HTML/PDF synchronously, для больших — async job с уведомлением.
+
+Файлы
+`app/services/pdf.py`, `app/services/reporting.py`,
+`app/jobs/export_jobs.py`, `frontend/src/pages/ExportPage.tsx`.
+
+Пример
+```http
+GET /api/profile/channels/tumblurr/report?format=pdf
+X-Report-SHA256: <digest>
+```
+
+Критерий готовности
+Отчёт воспроизводим, содержит период и методологию, а digest соответствует
+содержимому файла.
+
+1.3 Правила алертов
+Описание
+Добавить in-app правила для viewer_spike, ratio_collapse, score_threshold,
+stream_offline и stale_data. Для каждого правила хранить threshold, window,
+cooldown, channels, enabled и hysteresis; один всплеск не должен порождать
+десятки уведомлений.
+
+Файлы
+`app/services/alerts.py`, `app/models/alert.py`, `app/routers/alerts.py`,
+`frontend/src/pages/AlertsPage.tsx`, `tests/alerts/test_rules.py`.
+
+Пример
+```json
+{"type":"viewer_spike","threshold_pct":300,"window":"5m",
+ "cooldown_seconds":600}
+```
+
+Критерий готовности
+Правило срабатывает при переходе порога, не флапает на границе, а
+событие содержит channel, baseline, observed, window, score и explanation.
+
+1.4 Telegram
+Описание
+Реализовать отправку через Telegram Bot API с `chat_id`, retries на 429 и
+кратким русским текстом. Секрет бота хранить только в secret manager, chat_id
+и статус доставки — в БД.
+
+Файлы
+`app/services/telegram.py`, `app/jobs/notification_worker.py`,
+`app/models/alert.py`, `tests/alerts/test_telegram.py`.
+
+Пример
+```text
+⚠️ Наблюдение: #tumblurr
+Зрители выросли на 330%; чат не отреагировал.
+Score 78 · confidence 0.64
+```
+
+Критерий готовности
+Telegram недоступность не блокирует poller, повтор доставки не создаёт
+дубликаты, а в UI виден статус последней попытки.
+
+1.5 Исходящие webhooks
+Описание
+Поддержать URL, secret, события, test delivery и историю попыток. Подписывать
+событие HMAC по timestamp + raw body, повторять 5xx/429 с backoff, не
+повторять 4xx, запрещать private IP/SSRF и redirects.
+
+Файлы
+`app/services/webhook_delivery.py`, `app/models/webhook.py`,
+`app/routers/webhooks.py`, `tests/alerts/test_webhook_security.py`.
+
+Пример
+```http
+X-TVS-Signature: t=...,v1=<hmac>
+X-TVS-Event: anomaly.detected
+X-TVS-Delivery: evt_...
+```
+
+Критерий готовности
+Клиент может проверить подпись, повторная доставка имеет тот же event id,
+URL `169.254.169.254` и другие private/reserved адреса отклоняются.
+
+1.6 История и UI событий
+Описание
+Показать ленту алертов с фильтрами, непрочитанными, severity, channel и
+датой; дать кнопку «Отправить тест». Администратор должен видеть delivery
+status, response code, latency и число попыток.
+
+Файлы
+`frontend/src/pages/AlertsPage.tsx`, `app/routers/alerts.py`,
+`app/routers/webhooks.py`, `tests/e2e/test_alerts.py`.
+
+Пример
+```text
+Последняя доставка: 200 OK · 142 мс · попытка 1
+```
+
+Критерий готовности
+Ошибка доставки видна и не маскируется как успешная доставка, а событие
+можно безопасно повторить без двойного учёта.

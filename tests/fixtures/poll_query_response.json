@@ -1,0 +1,33 @@
+[
+  {
+    "data": {
+      "user": {
+        "id": "71092938",
+        "login": "xqc",
+        "displayName": "xQc",
+        "createdAt": "2014-09-12T23:50:05.989719Z",
+        "followers": { "totalCount": 12569876 },
+        "lastBroadcast": { "startedAt": "2026-09-27T19:47:19.897021Z" },
+        "stream": {
+          "id": "320551363424",
+          "type": "live",
+          "title": "🤖LIVE🤖DRAMA🤖NEWS🤖GTA V🤖NOPIXEL V🤖 5+5 = 10🤖BIG DAY TODAY🤖BIG IMPORTANT🤖HUGE🤖DONT MISS🤖JP RUNNING THE STREETS🤖GRINDFATHER IS BACK",
+          "viewersCount": 39648,
+          "createdAt": "2026-09-27T19:47:14Z",
+          "isMature": false,
+          "game": { "id": "32982", "name": "Grand Theft Auto V" },
+          "freeformTags": [
+            { "name": "English" },
+            { "name": "femboy" },
+            { "name": "DropsEnabled" }
+          ]
+        }
+      }
+    },
+    "extensions": {
+      "durationMilliseconds": 65,
+      "requestID": "01M3JGMPC7DSRBVSZ4FPZG3KTA",
+      "operationName": "StreamInfo"
+    }
+  }
+]

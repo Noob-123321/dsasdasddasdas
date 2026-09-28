@@ -1,0 +1,139 @@
+Шаг 7. Пользовательский дашборд и визуализация
+=====
+
+Назначение и важность
+---------------------
+Сделать интерфейс уровня референсного макета: тёмный фон, фиолетовый
+акцент, боковая навигация, KPI-карточки, таблица портфеля, графики и
+понятная детализация. Это не просто украшение: визуализация должна быстро
+показывать свежесть, риск и объяснение сигнала.
+
+Приоритет: P0
+
+Затрагиваемые файлы
+--------------------
+- `frontend/src/pages/DashboardPage.tsx`
+- `frontend/src/pages/ChannelDetailPage.tsx`
+- `frontend/src/pages/HistoryPage.tsx`
+- `frontend/src/pages/AlertsPage.tsx`
+- `frontend/src/components/PortfolioTable.tsx`
+- `frontend/src/components/KpiCard.tsx`
+- `frontend/src/components/AudienceChart.tsx`
+- `frontend/src/components/ScoreBreakdown.tsx`
+- `frontend/src/components/FreshnessBadge.tsx`
+- `frontend/src/styles/`
+- `frontend/src/api/`
+- `tests/e2e/`
+
+1.1 Визуальная система и shell
+Описание
+Сделать layout с левым sidebar: «Портфель», «История», «Алерты», «API-ключи»,
+«Настройки». Основная область содержит заголовок, кнопку «Добавить»,
+индикатор автообновления, KPI-карточки и таблицу. Использовать CSS tokens,
+focus-visible, контрастную типографику и responsive breakpoints.
+
+Файлы
+`frontend/src/components/AppShell.tsx`,
+`frontend/src/components/Sidebar.tsx`, `frontend/src/styles/tokens.css`,
+`frontend/src/styles/app.css`.
+
+Пример
+```text
+┌──────────────┬─────────────────────────────────────────────┐
+│ TVS Analytics│ Портфель              [Добавить] [30 сек]  │
+│              │ ┌────────┐ ┌────────┐ ┌────────┐ ┌────────┐ │
+│ Портфель     │ │Каналы  │ │Зрители │ │Риск    │ │Свежесть│ │
+│ История      │ └────────┘ └────────┘ └────────┘ └────────┘ │
+│ API-ключи    │ Таблица каналов с графиком и score           │
+└──────────────┴─────────────────────────────────────────────┘
+```
+
+Критерий готовности
+Дизайн читается на 1280 и 1920, на мобильном sidebar превращается в drawer,
+а все кнопки доступны с клавиатуры.
+
+1.2 Портфель и KPI
+Описание
+Показать количество каналов, суммарных зрителей, число каналов с score
+выше порога, API-квоту/количество запросов и свежесть данных. Таблица:
+канал, live, всего, чат, гости, ratio, risk, confidence, mini-sparkline и
+меню действий.
+
+Файлы
+`frontend/src/pages/DashboardPage.tsx`,
+`frontend/src/components/KpiCard.tsx`,
+`frontend/src/components/PortfolioTable.tsx`, `frontend/src/api/portfolio.ts`.
+
+Пример
+```json
+{"channels":12,"total_viewers":64908,"flagged":2,"api_usage_percent":38}
+```
+
+Критерий готовности
+Фильтры, сортировка и цветовой verdict работают без перезагрузки, а
+отсутствие данных отображается как `н/д`, а не ноль.
+
+1.3 Графики и детализация
+Описание
+Сделать графики all/auth/guests/ratio с переключением 1h/24h/7d/30d;
+выделить spikes вертикальными маркерами. На странице канала показывать
+score donut, factors, warnings, список аномалий, текст stream title,
+свежесть и ссылку на экспорт.
+
+Файлы
+`frontend/src/components/AudienceChart.tsx`,
+`frontend/src/components/ScoreBreakdown.tsx`,
+`frontend/src/pages/ChannelDetailPage.tsx`, `frontend/src/pages/HistoryPage.tsx`.
+
+Пример
+```text
+score 63/100 · confidence 0.42 · предварительно
+Низкий chat_ratio: 0.014
+Всплеск +330% без роста чата
+```
+
+Критерий готовности
+Пользователь может перейти от KPI к конкретному каналу и понять, почему
+он красный, не открывая исходный код или API.
+
+1.4 Данные и обновление
+Описание
+Использовать TanStack Query с query keys по профилю/каналу/периоду,
+polling 30 секунд для UI, кэш ответов на 15–30 секунд и отмену запросов
+при уходе со страницы. При 429/5xx не спамить сервер, показывать retry и
+последние успешные данные.
+
+Файлы
+`frontend/src/api/client.ts`, `frontend/src/queries/`,
+`frontend/src/hooks/usePolling.ts`, `frontend/src/components/QueryState.tsx`.
+
+Пример
+```ts
+useQuery({ queryKey: ['portfolio'], queryFn: getPortfolio,
+           refetchInterval: 30_000 })
+```
+
+Критерий готовности
+Десять вкладок не создают десять независимых опросов Twitch: API читает БД,
+а один browser polling не превышает лимит.
+
+1.5 Состояния, доступность и производительность
+Описание
+Реализовать loading skeleton, empty state, stale banner, permission error и
+success toast. Таблица должна иметь caption/headers, графики — текстовое
+описание, модальное окно — focus trap и Esc. Проверить reduced motion,
+контраст и keyboard navigation.
+
+Файлы
+`frontend/src/components/States.tsx`, `frontend/src/components/Modal.tsx`,
+`frontend/src/styles/a11y.css`, `tests/e2e/test_accessibility.py`.
+
+Пример
+```text
+Данные устарели: последний снимок 3 мин 12 сек назад.
+Показать сохранённый отчёт
+```
+
+Критерий готовности
+Основной пользовательский путь проходит без мыши, а Lighthouse/Playwright
+не показывает критических ошибок доступности.

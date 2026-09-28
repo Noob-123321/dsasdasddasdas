@@ -1,0 +1,135 @@
+Шаг 8. Публичный API v1 и документация API
+=====
+
+Назначение и важность
+---------------------
+Дать пользователю машинный доступ к той же аналитике, которую он видит в
+профиле. API-ключи `tvs_` создаются в профиле, наследуют parent TVS и
+действуют только вместе с ним. Документация должна быть одновременно
+автоматической, проверяемой и понятной человеку.
+
+Приоритет: P0
+
+Затрагиваемые файлы
+--------------------
+- `app/routers/v1.py`
+- `app/schemas/v1/`
+- `app/deps/api_auth.py`
+- `app/services/api_usage.py`
+- `app/routers/docs.py`
+- `docs/api/quickstart.md`
+- `docs/api/endpoints.md`
+- `docs/api/errors.md`
+- `docs/api/examples/`
+- `docs/CHANGELOG.md`
+- `frontend/src/pages/ApiKeysPage.tsx`
+- `tests/api/`
+
+1.1 Аутентификация и наследование доступа
+Описание
+Принимать `Authorization: Bearer tvs_...`. При каждом запросе проверить
+родительский TVS, срок/revoke, child key, scope и разрешённые каналы.
+Ошибка parent должна быть различимой только на уровне диагностики, без
+утечки чужих профилей.
+
+Файлы
+`app/deps/api_auth.py`, `app/services/api_keys.py`,
+`app/routers/v1.py`, `app/schemas/errors.py`.
+
+Пример
+```http
+Authorization: Bearer tvs_<секрет>
+GET /api/v1/channels/tumblurr/snapshot
+```
+
+Критерий готовности
+Действующий child видит данные родительского портфеля, не видит чужие
+каналы, а revoke/expire parent запрещает child независимо от его собственного
+срока.
+
+1.2 Контракт и read-endpoints
+Описание
+Реализовать snapshot, history, anomalies, summary, batch snapshots и
+profile portfolio summary. Единый envelope: `{ok, data, meta}` для успеха и
+`{ok:false, error:{code,message,details}, meta:{request_id}}` для ошибки.
+Историю отдавать cursor-based с `from`, `to`, `interval` и `limit`.
+
+Файлы
+`app/routers/v1.py`, `app/schemas/v1/`,
+`app/services/portfolio.py`, `tests/api/test_contract.py`.
+
+Пример
+```json
+{
+  "ok": true,
+  "data": {"channel":"tumblurr","total_viewers":48122,
+           "authorized":15021,"guests":33101,"score":null},
+  "meta": {"request_id":"req_..."}
+}
+```
+
+Критерий готовности
+Все поля имеют nullable/empty semantics, даты ISO-8601 UTC, а history
+имеет стабильный cursor и не возвращает offset-зависимые дубли.
+
+1.3 Лимиты, квоты и идемпотентность
+Описание
+Добавить per-key rate limit, месячную quota, заголовки
+`X-RateLimit-Limit/Remaining/Reset`, `Retry-After` при 429 и `request_id`.
+Для POST-операций в будущем поддержать `Idempotency-Key`; read API v1 можно
+оставить без POST-эффектов.
+
+Файлы
+`app/services/api_usage.py`, `app/security/ratelimit.py`,
+`app/routers/v1.py`, `tests/api/test_limits.py`.
+
+Пример
+```text
+X-RateLimit-Limit: 300
+X-RateLimit-Remaining: 271
+X-RateLimit-Reset: 1790000000
+```
+
+Критерий готовности
+Два параллельных запроса не обходят счётчик, исчерпание квоты даёт
+стабильный код `quota_exhausted`, а превышение rate limit не роняет worker.
+
+1.4 Автоматическая и человеческая документация
+Описание
+Включить OpenAPI 3.1, `/docs`, `/redoc`, `/openapi.json`. Написать quickstart,
+таблицу endpoints, схемы, ошибки, scopes, ограничения, срок жизни ключа,
+родительскую связь, curl/Python/JavaScript примеры и changelog.
+
+Файлы
+`app/main.py`, `app/routers/docs.py`, `docs/api/`,
+`docs/CHANGELOG.md`, `tests/api/test_openapi.py`.
+
+Пример
+```bash
+curl -H "Authorization: Bearer $TVS_API_KEY" \
+  https://tvs.example.com/api/v1/channels/tumblurr/history?interval=5m
+```
+
+Критерий готовности
+Пример из документации копируется и работает на тестовом ключе; OpenAPI
+валидна; каждый endpoint имеет description, auth, errors и response schema.
+
+1.5 Управление API-ключами в профиле
+Описание
+Сделать страницу создания, копирования, revocation и списка ключей. Показывать
+prefix, дату создания, last_used_at, parent expiry и состояние, но не
+показывать секрет в обычных списках. Reveal/copy — отдельное аудируемое
+действие.
+
+Файлы
+`app/routers/profiles.py`, `app/routers/accounts.py`,
+`frontend/src/pages/ApiKeysPage.tsx`, `frontend/src/components/CopyButton.tsx`.
+
+Пример
+```text
+tvs_7Fk2... · read · действует до parent expiry · создан 23.09.2026
+```
+
+Критерий готовности
+Пользователь может создать несколько независимых API-ключей и отозвать
+каждый отдельно, не влияя на TVS-вход.

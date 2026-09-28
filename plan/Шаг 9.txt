@@ -1,0 +1,159 @@
+Шаг 9. Админ-панель, аудит и статистика нагрузки
+=====
+
+Назначение и важность
+---------------------
+Сделать единую административную поверхность без ролевой системы:
+административные TVS-ключи дают доступ к управлению профилями, ключами,
+каналами и наблюдением. Отдельный обязательный блок — понять текущую
+нагрузку сервера и активность пользователей без чтения сырых логов.
+
+Приоритет: P0
+
+Затрагиваемые файлы
+--------------------
+- `app/routers/admin.py`
+- `app/services/admin_tokens.py`
+- `app/services/audit.py`
+- `app/services/server_metrics.py`
+- `app/jobs/metrics_collector.py`
+- `app/models/server_metric.py`
+- `frontend/src/pages/admin/AdminOverviewPage.tsx`
+- `frontend/src/pages/admin/AdminTokensPage.tsx`
+- `frontend/src/pages/admin/AdminProfilesPage.tsx`
+- `frontend/src/pages/admin/AdminAuditPage.tsx`
+- `frontend/src/pages/admin/AdminLoadPage.tsx`
+- `tests/admin/`
+
+1.1 Вход и bootstrap администратора
+Описание
+Первый admin TVS создаётся bootstrap-командой при развёртывании. После
+этого только администратор может создавать другие admin TVS. Проверка admin
+выполняется по типу access token, не по имени пользователя и не по
+суффиксу ключа.
+
+Файлы
+`app/routers/admin.py`, `app/cli.py`, `app/services/admin_tokens.py`,
+`frontend/src/pages/admin/AdminLoginPage.tsx`.
+
+Пример
+```powershell
+python -m app.cli create-admin --label "Владелец"
+```
+
+Критерий готовности
+Профильный TVS не видит `/admin`; скомпрометированный admin key можно
+отозвать, и все его сессии немедленно завершаются.
+
+1.2 Управление профилями и TVS-ключами
+Описание
+Сделать таблицу профилей и ключей: label, prefix, тип, created/last_used,
+expiry, revoked, unlimited, число каналов, quota и статус. Админ может
+создать user TVS или admin TVS, задать бессрочный/limited срок, изменить
+срок после создания, скопировать секрет, отозвать ключ и включить unlimited.
+
+Файлы
+`app/routers/admin.py`, `app/services/tokens.py`,
+`frontend/src/pages/admin/AdminTokensPage.tsx`,
+`frontend/src/components/TokenDrawer.tsx`.
+
+Пример
+```json
+{"kind":"profile","unlimited":true,"expires_at":null,
+ "allowed_channels":[]}
+```
+
+Критерий готовности
+Изменение expiry/allowlist видно в аудите и применяется к новым запросам
+не позже следующей секунды, а старая сессия учитывает отзыв.
+
+1.3 Управление каналами и правами
+Описание
+Показать карточку профиля с каналами, источником (`profile`, `admin`,
+`api`), датой добавления, live/score и причиной ограничения. Админ может
+добавить канал в allowlist, убрать его или снять все ограничения; пользователь
+при этом не получает административных прав.
+
+Файлы
+`app/routers/admin.py`, `app/services/access_policy.py`,
+`frontend/src/pages/admin/AdminProfilesPage.tsx`,
+`tests/admin/test_channel_policy.py`.
+
+Пример
+```text
+Профиль #42
+Ограничения: выключены
+Каналы: 18 добавлено пользователем, 4 доступно администратору
+```
+
+Критерий готовности
+Изменение allowlist не изменяет данные канала и не даёт пользователю
+возможность добавить запрещённый канал через обход UI.
+
+1.4 Аудит операций
+Описание
+Писать audit event на вход, logout, redeem, reveal/copy, create, update,
+revoke, channel policy change, export, webhook change и admin load access.
+Хранить actor, action, object id, before/after без секретов, IP,
+user-agent, request_id и timestamp.
+
+Файлы
+`app/services/audit.py`, `app/models/audit.py`, `app/routers/admin.py`,
+`frontend/src/pages/admin/AdminAuditPage.tsx`, `tests/admin/test_audit.py`.
+
+Пример
+```json
+{"action":"token.reveal","actor":"admin:7",
+ "object_id":"tok_123","request_id":"req_..."}
+```
+
+Критерий готовности
+Нельзя открыть полный секрет из audit payload или найти его в истории
+событий; фильтры по actor/action/date работают.
+
+1.5 Статистика пользователей
+Описание
+Собрать активность пользователей: уникальные активные профили за 1/24 часа,
+число активных сессий, login/redeem/refresh/logout counts, самые активные
+профили, число запросов к UI/API по маршрутам, ошибки 4xx/5xx, latency p50/p95
+и использование API-квоты.
+
+Файлы
+`app/services/server_metrics.py`, `app/jobs/metrics_collector.py`,
+`app/routers/admin.py`, `frontend/src/pages/admin/AdminLoadPage.tsx`,
+`tests/admin/test_user_metrics.py`.
+
+Пример
+```text
+Активные профили: 128 за 24 ч
+Активные сессии: 43
+API: 12 840 запросов / 24 ч
+p95 latency: 184 ms
+```
+
+Критерий готовности
+Цифры обновляются с заданным интервалом, не содержат токенов и позволяют
+ответить на вопросы «кто сейчас активен» и «какой endpoint создаёт
+нагрузку».
+
+1.6 Нагрузка poller, БД и Twitch
+Описание
+Показывать число active channels, backlog/next due, cycles, polls, samples,
+deduped samples, upstream latency/error rate, retry/backoff, poller uptime,
+last successful poll, DB pool size/queue time, Redis memory/latency и, если
+доступно, process CPU/RAM. Добавить freshness и alert threshold.
+
+Файлы
+`app/services/server_metrics.py`, `app/services/poller.py`,
+`app/jobs/metrics_collector.py`, `frontend/src/pages/admin/AdminLoadPage.tsx`,
+`tests/admin/test_load_metrics.py`.
+
+Пример
+```json
+{"active_channels":1000,"backlog":0,"poller_uptime":0.999,
+ "twitch_error_rate":0.002,"p95_query_ms":184}
+```
+
+Критерий готовности
+Администратор видит текущую и историческую нагрузку, может отличить медленный
+Twitch от медленной БД и получает warning при backlog/error spike.

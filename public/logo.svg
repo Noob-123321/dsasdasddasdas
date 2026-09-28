@@ -1,0 +1,9 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="60 24 120 216" role="img" aria-label="TVS">
+  <defs>
+    <linearGradient id="tvsLogo" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#b68aff"/>
+      <stop offset="1" stop-color="#8b5cf6"/>
+    </linearGradient>
+  </defs>
+  <path fill="url(#tvsLogo)" d="M60 24h72v12h-72zM84 36h24v96h-24zM132 72h24v72h-24zM96 132h36v24h-36zM156 132h12v36h-12zM132 144h12v12h-12zM168 144h12v24h-12zM108 156h24v24h-24zM120 180h48v12h-48zM156 192h24v36h-24zM108 204h24v24h-24zM144 216h12v24h-12zM120 228h24v12h-24zM156 228h12v12h-12z"/>
+</svg>

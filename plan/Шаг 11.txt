@@ -1,0 +1,158 @@
+Шаг 11. Docker, CI, мониторинг, backup и эксплуатация
+=====
+
+Назначение и важность
+---------------------
+Собрать полноценный production-контур: воспроизводимый запуск, отдельные
+API/poller процессы, миграции PostgreSQL, Redis, HTTPS, health checks,
+backup и наблюдаемость. Админская статистика нагрузки должна опираться на
+реальные метрики этого контура.
+
+Приоритет: P0
+
+Затрагиваемые файлы
+--------------------
+- `docker-compose.yml`
+- `docker-compose.prod.yml`
+- `Dockerfile`
+- `frontend/Dockerfile`
+- `.github/workflows/ci.yml`
+- `scripts/check_postgres.py`
+- `scripts/backup_postgres.py`
+- `scripts/restore_postgres.py`
+- `app/main.py`
+- `app/jobs/health.py`
+- `app/services/logging.py`
+- `docs/runbook.md`
+- `docs/configuration.md`
+
+1.1 Compose-топология
+Описание
+Поднять `postgres`, `redis`, `api`, `poller`, `notification-worker` и
+frontend/reverse-proxy. API не должен запускать poller в том же процессе;
+poller должен переживать рестарт web без потери истории.
+
+Файлы
+`docker-compose.yml`, `docker-compose.prod.yml`, `Dockerfile`,
+`frontend/Dockerfile`, `app/main.py`, `app/jobs/run_poller.py`.
+
+Пример
+```powershell
+docker compose up -d postgres redis
+docker compose run --rm api python -m alembic upgrade head
+docker compose up -d api poller notification-worker
+```
+
+Критерий готовности
+Один `docker compose up` поднимает сервисы в правильном порядке, healthcheck
+ждёт миграции и Redis, а poller имеет отдельный restart policy.
+
+1.2 Secrets и конфигурация
+Описание
+Разделить public config и secrets. В production encryption key, database
+credentials, webhook secrets, bot token и bootstrap admin не хранятся в
+репозитории или image. Поддержать secret manager или зашифрованный env
+файл с ограниченными правами.
+
+Файлы
+`.env.example`, `docs/configuration.md`, `deploy/secrets/`,
+`app/config.py`, `.github/workflows/ci.yml`.
+
+Пример
+```env
+APP_ENV=production
+TOKEN_ENCRYPTION_KEY_FILE=/run/secrets/token_encryption_key
+DATABASE_URL_FILE=/run/secrets/database_url
+```
+
+Критерий готовности
+CI проверяет отсутствие секретов, production отказывается стартовать с
+пустым encryption key, а rotation key задокументирована без потери доступа к
+существующим профилям.
+
+1.3 Миграции, backup и restore
+Описание
+Все изменения схемы оформлять Alembic. Перед release делать backup PostgreSQL,
+после миграции выполнять readiness check. Хранить encryption key отдельно от
+backup-тома и документировать процедуру key rotation.
+
+Файлы
+`migrations/`, `scripts/backup_postgres.py`,
+`scripts/restore_postgres.py`, `docs/runbook.md`.
+
+Пример
+```powershell
+python -m alembic upgrade head
+python scripts/backup_postgres.py --output C:\backups\tvs-2026-09-23.dump
+python scripts/restore_postgres.py --input C:\backups\tvs-2026-09-23.dump
+```
+
+Критерий готовности
+Restore проверен на тестовой БД, миграции идемпотентны, rollback возможен
+без удаления данных.
+
+1.4 Health, logs и server metrics
+Описание
+Реализовать `/healthz`, `/readyz`, `/metrics` для внутреннего мониторинга и
+admin load API. Логи должны быть JSON-структурированными, с request_id,
+route, status, latency, user/profile id без токенов. Собирать uptime, request
+rate, error rate, p50/p95/p99, DB/Redis pool, poller backlog и Twitch errors.
+
+Файлы
+`app/routers/health.py`, `app/services/server_metrics.py`,
+`app/services/logging.py`, `app/jobs/metrics_collector.py`.
+
+Пример
+```json
+{"ts":"2026-09-23T12:00:00Z","route":"/api/profile",
+ "status":200,"latency_ms":43,"profile_id":42,"request_id":"req_..."}
+```
+
+Критерий готовности
+Метрики не содержат секретов, readiness падает при недоступной критической
+БД, а Grafana/внутренний dashboard видят те же цифры, что admin UI.
+
+1.5 CI и supply chain
+Описание
+В CI запускать lint, typecheck, unit, integration на PostgreSQL/Redis,
+migration check, frontend build и security checks. Версии зависимостей
+фиксировать lock-файлами, secrets не передавать в pull request builds.
+
+Файлы
+`.github/workflows/ci.yml`, `pyproject.toml`, `frontend/package-lock.json`,
+`SECURITY.md`.
+
+Пример
+```powershell
+python -m pytest -q
+npm ci
+npm run build
+python -m alembic check
+```
+
+Критерий готовности
+Merge невозможен при падении миграции, тестов или production build; уязвимые
+зависимости и секреты видны отдельным check.
+
+1.6 Runbook и эксплуатационная безопасность
+Описание
+Описать deploy, rollback, key rotation, backup restore, Twitch outage,
+PostgreSQL outage, Redis outage, poller backlog, mass revoke и incident
+communication. Ограничить доступ к production и регулярно проверять restore.
+
+Файлы
+`docs/runbook.md`, `docs/security.md`, `docs/incidents.md`,
+`scripts/check_postgres.py`.
+
+Пример
+```text
+Инцидент: poller backlog > 1000
+1. Проверить Twitch error rate.
+2. Проверить DB/Redis latency.
+3. Остановить только poller, не API.
+4. Восстановить и проверить idempotent aggregates.
+```
+
+Критерий готовности
+Новый дежурный может по runbook безопасно выполнить deploy, rollback и
+восстановление без доступа к исходному коду.

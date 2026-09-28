@@ -1,0 +1,251 @@
+# TVS Analytics — план функционала и проверка работоспособности
+
+Обновлено: 24.09.2026
+Проект: C:\Users\Artem\Downloads\pro\twitch
+
+## 1. Что это за сервис
+
+TVS Analytics — не «кнопка Бот», а сервис наблюдения за публичными
+Twitch-каналами. Он собирает доступные сигналы Twitch во времени, сохраняет
+историю, рассчитывает explainable risk score, показывает причины оценки и
+позволяет управлять доступом, портфелем, API, алертами и эксплуатацией.
+
+Главная граница честности:
+
+- `total_viewers`, `chatters_count` и `is_live` — наблюдаемые значения источника;
+- `guests` и `chat_ratio` — производные метрики;
+- `risk_score` — индекс необычности поведения, а не вероятность накрутки;
+- `confidence` — полнота и качество выборки;
+- красный флаг означает «нужно проверить», а не «это бот» и не автоматический бан.
+
+Сервис не обещает установить личность человека, определить конкретные bot-аккаунты
+или доказать мошенничество по одному снимку.
+
+## 2. Сравнение с голой механикой определения ботов/зрителей
+
+| Возможность | Голая механика: один запрос/скрипт | TVS Analytics |
+|---|---|---|
+| Источник данных | Один снимок Twitch или ручной запрос | Фоновый GQL-collector с интервалом 60 секунд и retry |
+| Объём | Один канал | Портфель из неограниченного числа разрешённых каналов |
+| Время | Почти нет истории | История, 5m/1h aggregates, окна 24 часа / 7 дней / 30 дней |
+| Метрики | Обычно только viewers | viewers, chatters, capped/raw chat ratio, guests, live/offline, stale, title/game |
+| Аномалии | Порог «больше/меньше» | Spike detector, форма пика, baseline, confidence и подробные причины |
+| Оценка | Один boolean «бот/не бот» | Risk score 0–100, factors, warnings, explanation и ручное решение |
+| Данные чата | Неясная интерпретация | `guests = viewers - authorized`, где `authorized = min(chatters, viewers)`; это не идентификация ботов |
+| Ошибки источника | Непонятно, что произошло | Последнее значение сохраняется, ошибка изолируется, stale/error видны |
+| Дедупликация | Каждый опрос как новая точка | Change-aware deduplication и `repeat_count` для неизменившихся счётчиков |
+| Вход | Секрет в коде или открытый доступ | TVS-лицензионный ключ, HttpOnly session, expiry/revoke, multi-device |
+| Доступ | Один общий пароль или отсутствует | Профиль allowlist/unlimited, отдельный admin-контур, child `tvs_` API keys |
+| API | Нет или одноразовый curl | Документированный API v1, portfolio, history, summary, anomalies, batch |
+| Автоматизация | Только просмотр | In-app alerts, webhook registration/test, HMAC, Telegram delivery hook |
+| Экспорт | Скриншот/консоль | CSV, HTML/PDF report, digest, history |
+| Управление | Нет | Политики, ключи, expiry, revoke, rotate, audit log |
+| Наблюдаемость | Неизвестно, работает ли сбор | Health/readiness, request ID, метрики, latency, poller stats, admin load charts |
+| Ответственность за вывод | Слишком легко выдать ложный verdict | UI и API прямо предупреждают, что score не является доказательством |
+
+Ключевая разница: голая механика отвечает на вопрос «какое число сейчас?».
+TVS отвечает на более полезный вопрос: «как канал вёл себя во времени, какие
+изменения вызвали сигнал, насколько уверенно мы можем судить, кто имеет доступ,
+как получить данные автоматически и как проверить решение вручную».
+
+## 3. План функционала по этапам
+
+### Этап 0. Контракт продукта и границы — DONE
+
+- Зафиксировать TVS-формат, профили, unlimited/allowlist и отсутствие ролей.
+- Определить честную семантику score/confidence и запрет автоматического бана.
+- Отделить demo-данные от реального `TWITCH_SOURCE=gql`.
+- Определить production-цели: PostgreSQL, Redis, HTTPS reverse proxy.
+
+Критерий: пользователь может объяснить, что сервис измеряет и чего он не
+доказывает. В UI, README и API это отражено.
+
+### Этап 1. Доступ, ключи и безопасность — DONE локально
+
+- Создание profile/admin TVS-ключей формата `TVS_` + 128 символов.
+- Хранение lookup hash и зашифрованной копии секрета.
+- Сессии в HttpOnly cookie, logout и multi-device login.
+- Expiry, revoke, audited reveal и rotate для старых/legacy secrets.
+- Отдельный admin key и проверка admin-only маршрутов.
+- Child `tvs_` API key с parent scope; автоматическая недействительность при
+  revoke/expiry родителя.
+- Webhook secret хранится шифрованно и не возвращается повторно в ответе API.
+- Rate limit на redeem, origin validation, security headers/CSP, request ID.
+
+Критерий: неправильный/отозванный/истёкший ключ не получает profile или API
+данные; ревизор может увидеть операцию в audit.
+
+### Этап 2. Сбор Twitch-данных и история — DONE локально
+
+- Изолированный `TwitchClient` с demo и GQL источниками.
+- Poller с retry/backoff и изоляцией ошибки одного канала от остальных.
+- Live/offline, viewers, chatters, title, game и время наблюдения.
+- Дедупликация неизменившихся значений и отдельные stream lifecycle поля.
+- 5m/1h aggregates и миграция уникальности aggregate bucket.
+- Retention job и operational scripts.
+
+Критерий: канал может быть офлайн или временно недоступен без fabricated
+live value; история сохраняется и повторно используется.
+
+### Этап 3. Метрики и объяснимая аналитика — DONE локально
+
+- Производные значения: capped/raw chat ratio, authorized, guests, stale.
+- Медиана/MAD baseline и spike detector.
+- Risk score, factors, warnings, explanation и confidence.
+- Отдельная фиксация sample count и обновление score на каждом цикле.
+- Фильмы и ограничения: score не probability, insufficient sample warning.
+
+Критерий: каждый score можно разобрать до конкретного фактора и предупреждения;
+нет формулировки «доказанный бот».
+
+### Этап 4. Портфель и интерфейс — DONE локально
+
+- Пустой профиль и массовый parser Twitch URL/login через whitespace.
+- Allowlist или unlimited без лимита количества каналов.
+- Отдельные Portfolio и History views.
+- Online/offline состояния, зелёный/красный текст, custom scrollbars.
+- Фильтры All/Live/Подозрительные, поиск и empty-state Add.
+- Viewer/chat chart, отдельные оси, точки, dashed latest lines и offline state.
+- Мини-тренды в таблице, ссылка на Twitch, truncation длинных title.
+- Красный risk flag, hover reasons и подробный risk-report modal.
+- Время обновления отображается на страницах, где обновляются данные.
+- История каналов поддерживает горизонтальный scroll обычным колесом и
+  Shift+колесом; элементы не сжимаются в нечитаемую полосу.
+- CSV/PDF скачиваются через authenticated fetch/blob flow, а не только через
+  ссылку, зависящую от поведения браузера.
+
+Критерий: основной пользовательский путь от login до анализа и скачивания
+работает без мёртвых кнопок; обновление не перерисовывает весь shell.
+
+### Этап 5. API, алерты и интеграции — CORE DONE; external delivery partial
+
+- API v1: snapshot, history, anomalies, summary, portfolio, batch, me.
+- Child API key scopes и parent inheritance.
+- OpenAPI `/docs`, `/redoc`, `/openapi.json`.
+- CSV и HTML/PDF reports с SHA-256 digest.
+- In-app alert feed и CRUD правил.
+- Webhook URL validation, encrypted secret, HMAC test delivery.
+- Telegram delivery hook через настройки токена/chat ID.
+
+Критерий: локальный API contract работает; внешние Telegram/production webhook
+доставки должны быть отдельно подтверждены реальным endpoint smoke test.
+
+### Этап 6. Администрирование и эксплуатация — DONE локально; production pending
+
+- Tokens/profiles/policy/audit/load endpoints и admin dashboard.
+- Скрытие revoked tokens, reveal/copy/rotate, expiry editing.
+- Request/status/route/poller charts, active sessions/profiles/channels/keys.
+- Health, readiness, metrics, request IDs, middleware headers.
+- Docker Compose, Alembic migrations, CI, backup/retention/runbook.
+- PostgreSQL/Redis требуют runtime проверки в окружении с Docker.
+
+Критерий локальной версии: администратор может безопасно оперировать профилями
+и видеть операционные метрики. Production-критерий добавляет реальный PG/Redis,
+HTTPS, secret manager и backup restore test.
+
+### Этап 7. Приёмка и релиз — IN PROGRESS
+
+- Fresh automated checks.
+- Browser smoke tests на desktop/tablet/mobile.
+- Реальный GQL network smoke test.
+- Docker PostgreSQL/Redis integration.
+- External Telegram/webhook delivery.
+- Load/concurrency и restore-from-backup проверка.
+- Финальная проверка публичного HTTPS origin.
+
+## 4. Проверка работоспособности: что уже выполнено
+
+### Автоматические проверки
+
+- `python -m pytest -q` → 35 passed, 1 стороннее предупреждение Starlette/httpx
+  (13 tests нового FastAPI-приложения, включая regression checks для
+  SPA/webhook/API usage/expiry, + 22 legacy backend tests).
+- `node --check public/app.js` → exit 0.
+- `ruff check app` → All checks passed.
+- `python -m compileall -q app src tests tools` → exit 0.
+- `python -m alembic check` → No new upgrade operations detected.
+- OpenAPI inventory → 41 documented API paths.
+- `python -m alembic upgrade head` на fresh SQLite → passed ранее.
+- `TWITCH_SOURCE=demo` smoke flow → login, add channels, poll, overview,
+  child API key, alerts и admin rotation проверены.
+- Integration smoke matrix → 45 проверок: auth/guards, admin, profile,
+  history/snapshot/anomalies, CSV/PDF, child API v1, batch, alerts, webhooks,
+  audit/load, rotation и parent-revoke inheritance.
+- Expiry smoke → истёкший profile key отклоняется, после продления через admin
+  снова принимается.
+- Security smoke → security headers/CSP/request ID присутствуют, чужой Origin
+  получает 403; webhook secret не возвращается в create response.
+- Stale-alert smoke → после искусственного outage старше 5 минут создаётся
+  `stale_data` event.
+- Policy smoke → после сужения allowlist уже добавленный канал исчезает из
+  overview и возвращает 404 вместо обхода новой политики.
+
+### Browser smoke tests
+
+На локальном demo server проверены:
+
+- login по TVS и создание профиля;
+- массовое добавление каналов;
+- Portfolio и отдельная History, включая прямой вход на `/history`;
+- online/offline цвета и статусы;
+- поиск и фильтры All/Live/Подозрительные;
+- viewer/chat chart и offline chart state;
+- risk flag и detailed report modal;
+- CSV download `avice-24h.csv`;
+- PDF download `avice-24h.pdf`;
+- обычное колесо и Shift+колесо по горизонтальному списку истории;
+- API page, alerts, admin tabs/charts;
+- responsive checks на 360/768/1440 viewport.
+
+### Реальный источник
+
+Выполнялась live-проверка `TWITCH_SOURCE=gql` на публичном канале `hasanabi`:
+реальный GQL ответил, offline-канал разрешается как offline, а последовательные
+наблюдения дали viewers/chatters без пустого ответа. Это smoke test адаптера,
+не доказательство качества или отсутствия ботов.
+
+## 5. Что пока нельзя честно назвать проверенным
+
+- В production-сервисе Docker Compose теперь принудительно включён
+  `COOKIE_SECURE=1`; локальная разработка остаётся на `.env`/Uvicorn.
+- Redis URL настроен, но текущий rate limiter работает только внутри процесса;
+  перед горизонтальным production-масштабированием его нужно перенести на общий
+  Redis backend.
+- Полный PostgreSQL/Redis Compose прогон: Docker на машине отсутствует.
+- PostgreSQL migration 0003 проверен на fresh SQLite; реальный PostgreSQL FK
+  прогон ещё не выполнен.
+- Реальная доставка в Telegram и production webhook endpoint с retries.
+- В production ещё нужно санитизировать validation errors, добавить no-store к
+  secret responses и полноценный CSRF/re-auth policy для reveal операций.
+- Webhook URL validation пока не закрывает DNS rebinding, redirect-to-private и
+  полноценный SSRF/egress control.
+- `0001_initial` использует `Base.metadata.create_all`, поэтому initial migration
+  не является полностью immutable; перед production нужна ревизия схемы вручную.
+- API `scopes`/quota enforcement и delivery history ещё требуют production-grade
+  реализации; usage counter теперь сохраняется.
+- Отдельной stream-session таблицы и полноценной daily/weighted aggregate иерархии
+  пока нет; score snapshot обновляется, но не хранится как полноценная score-history.
+- UI пока не покрывает list/delete/test webhooks и отдельный anomalies feed.
+- Legacy `src/` backend остаётся рядом и не подключён к `app.main:app`; его
+  22 теста не являются тестами нового FastAPI-сервиса.
+- Нагрузочное тестирование при большом числе каналов и пользователей.
+- Restore backup в отдельном production-like окружении.
+- Длительная (6–24 часа) история конкретного канала для высокой confidence.
+- Любое автоматическое определение ботов: сервис даёт сигналы и объяснения,
+  но не идентифицирует bot-аккаунты и не доказывает накрутку.
+
+## 6. Критерий готовности продукта
+
+Сервис можно выпускать как observation/alerting MVP, если:
+
+1. automated checks проходят;
+2. login → portfolio → history → score/report проходит в браузере;
+3. API-ключ не выходит за parent scope;
+4. отзыв/истечение ключа закрывает доступ;
+5. ошибка одного канала не ломает весь poller;
+6. экспорт и alerts работают на demo;
+7. production secrets, HTTPS, PG/Redis и external delivery проверены в
+   окружении эксплуатации.
+
+До этого статуса сервис следует называть локально проверенным MVP, а не
+промышленным доказанным детектором ботов.

@@ -1,0 +1,136 @@
+Шаг 4. Twitch-адаптер, poller, история и дедупликация
+=====
+
+Назначение и важность
+---------------------
+Перевести сервис с «живого запроса при клике» на фоновую наблюдательную
+систему. Это даёт историю, графики, score и устойчивость к недоступности
+Twitch. Идеи Claude используются как механика: дедупликация по обоим
+измеренным полям, сессии эфира, backoff, graceful shutdown и probe-скрипты.
+
+Приоритет: P0
+
+Затрагиваемые файлы
+--------------------
+- `app/services/twitch_client.py`
+- `app/services/twitch_gql.py`
+- `app/services/poller.py`
+- `app/services/observations.py`
+- `app/services/stream_sessions.py`
+- `app/jobs/probe_fields.py`
+- `app/config.py`
+- `tools/probe_update_rate.py`
+- `tools/probe_field_independence.py`
+- `tools/probe_available_fields.py`
+- `tests/poller/`
+- `tests/twitch/`
+
+1.1 Изолированный Twitch-адаптер
+Описание
+Определить интерфейс `get_channel_stats(login)`. Первая реализация читает
+существующий анонимный GQL и возвращает только факты: is_live, stream_id,
+started_at, title, game, viewer_count, chatters_count, followers_count и
+дату создания канала, если поле доступно. Сетевые таймауты, retries и
+деградация `chatters` не должны ронять viewer_count.
+
+Файлы
+`app/services/twitch_client.py`, `app/services/twitch_gql.py`,
+`tests/twitch/test_client.py`.
+
+Пример
+```python
+stats = await twitch_client.get_channel_stats("tumblurr")
+# {is_live, viewer_count, chatters_count, stream_id, ...}
+```
+
+Критерий готовности
+Падение CommunityTab оставляет валидные данные зрителей и `chatters_error`,
+а изменение GQL обнаруживается probe-скриптом и не маскируется как офлайн.
+
+1.2 Probe-измерения вместо выдуманных констант
+Описание
+Добавить периодические проверки доступных полей, частоты изменения
+счётчиков, независимости viewers/chatters и cluster correlation. Результаты
+разделять на «измерено» и «выбор продукта». Не использовать корреляцию
+между каналами как доказательство накрутки без новой валидации.
+
+Файлы
+`app/jobs/probe_fields.py`, `tools/probe_*.py`, `docs/methodology.md`,
+`tests/tools/test_probe_outputs.py`.
+
+Пример
+```powershell
+python tools/probe_available_fields.py --login tumblurr
+python tools/probe_field_independence.py --minutes 5
+```
+
+Критерий готовности
+В репозитории есть воспроизводимые измерения, а константы скоринга ссылаются
+на источник измерения или явно помечены как продуктовый выбор.
+
+1.3 Фоновый poller
+Описание
+Сделать отдельный процесс с интервалом 60 секунд. Он выбирает активные
+каналы, работает пачками, коммитит блоками, а интерфейс только читает БД.
+Канал автоматически попадает в active после добавления в профиль или первого
+успешного открытия отчёта.
+
+Файлы
+`app/services/poller.py`, `app/jobs/run_poller.py`,
+`app/repositories/channels.py`, `docker-compose.yml`, `.env.example`.
+
+Пример
+```powershell
+python -m app.jobs.run_poller --once
+python -m app.jobs.run_poller
+```
+
+Критерий готовности
+При 1000 активных каналах цикл укладывается в допустимый интервал,
+ошибка одного канала не откатывает уже записанные данные других, а
+остановка не оставляет активных транзакций.
+
+1.4 Дедупликация и сессии стримов
+Описание
+Если изменились только viewers или только chatters, создавать новую
+наблюдаемую строку. Если оба значения и live-статус неизменны, продлевать
+предыдущую строку. Открывать новую stream-сессию при новом stream_id, не
+закрывать её при shutdown и записывать `ended_at` только после наблюдаемого
+ухода в офлайн.
+
+Файлы
+`app/services/observations.py`, `app/services/stream_sessions.py`,
+`app/models/stream.py`, `tests/poller/test_dedup.py`.
+
+Пример
+```text
+(viewers=100, chatters=20) -> новая строка
+(viewers=100, chatters=20) -> extend last_seen/repeat_count
+(viewers=100, chatters=21) -> новая строка
+```
+
+Критерий готовности
+Тесты проверяют смену только одного поля, переход live/offline, рестарт
+процесса и разницу между `ended_at` и `observed_until`.
+
+1.5 Ошибки, backoff и остановка
+Описание
+Для каждого канала применять retry с backoff 5–300 секунд, не роняя весь
+poller. Обрабатывать Ctrl+C, SIGTERM и Windows SIGBREAK: перестать новые
+опросы, дождаться текущего блока, закрыть сессии через observed_until,
+сохранить агрегаты и выйти с диагностикой.
+
+Файлы
+`app/services/poller.py`, `app/jobs/shutdown.py`,
+`tests/poller/test_shutdown.py`, `tests/lifecycle/test_process.py`.
+
+Пример
+```python
+poller.stop()
+poller.shutdown()
+assert stats["errors"] == 0
+```
+
+Критерий готовности
+Lifecycle-тест запускает настоящий процесс, останавливает его сигналом и
+проверяет отсутствие потери уже записанных данных.

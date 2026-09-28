@@ -1,0 +1,168 @@
+Шаг 2. TVS-ключи, API-ключи, сессии и безопасность
+=====
+
+Назначение и важность
+---------------------
+Сделать вход по ключу основным сценарием, сохранить возможность повторно
+скопировать секрет администратору и не превращать браузерный профиль в
+публичную ссылку с секретом. Это самый критичный слой продукта и безопасности.
+
+Приоритет: P0
+
+Затрагиваемые файлы
+--------------------
+- `app/security/tokens.py`
+- `app/security/sessions.py`
+- `app/security/encryption.py`
+- `app/security/ratelimit.py`
+- `app/security/csrf.py`
+- `app/routers/auth.py`
+- `app/routers/admin.py`
+- `app/services/tokens.py`
+- `app/services/api_keys.py`
+- `app/services/audit.py`
+- `frontend/src/pages/LoginPage.tsx`
+- `frontend/src/pages/ProfilePage.tsx`
+- `frontend/src/api/client.ts`
+- `tests/security/test_tokens.py`
+- `tests/security/test_auth.py`
+- `tests/security/test_api_keys.py`
+
+1.1 Формат и генерация секретов
+Описание
+Генерировать `TVS_` + ровно 128 символов из безопасного URL-safe алфавита.
+Не использовать логин, время, UUID или предсказуемый счётчик. Создание
+секрета возвращает полное значение только в момент создания либо в ответе
+администратора после повторной аутентификации.
+
+Файлы
+`app/security/tokens.py`, `app/services/tokens.py`,
+`app/routers/admin.py`, `frontend/src/pages/AdminTokensPage.tsx`.
+
+Пример
+```python
+raw = "TVS_" + secrets.token_urlsafe(96)[:128]
+assert len(raw) == 132
+assert raw.startswith("TVS_")
+```
+
+Критерий готовности
+Все TVS-ключи имеют длину 132 и уникальный lookup hash; угадать ключ по
+профилю, дате или имени стримера невозможно.
+
+1.2 Хранение, копирование и отзыв
+Описание
+В БД хранить три представления: `prefix` для поиска в списках, уникальный
+SHA-256 hash для проверки входа и зашифрованный секрет для повторного
+показа администратору. Для шифрования использовать AEAD с ключом из secret
+manager. Просмотр/копирование секрета — отдельное аудируемое действие с
+повторной проверкой админ-сессии. Отзыв делает ключ недействительным
+немедленно во всех кэшах и API.
+
+Файлы
+`app/security/encryption.py`, `app/models/access_tokens.py`,
+`app/services/tokens.py`, `app/routers/admin.py`, `app/services/audit.py`.
+
+Пример
+```text
+POST /api/admin/tokens/{id}/reveal
+Cookie: tvs_session=<HttpOnly>
+Audit: admin revealed token prefix tvs_7Fk2...
+```
+
+Критерий готовности
+В логах, URL, Referer, error payload и localStorage нет полного секрета;
+администратор может скопировать действующий ключ, а после revoke он не
+проходит проверку даже при правильном значении.
+
+1.3 Профильные и административные ключи
+Описание
+Тип ключа хранится как `profile` или `admin`, без ролевой системы. Первый
+админский ключ создаётся bootstrap-командой/секретом при развёртывании;
+после этого администратор создаёт и отзывает другие административные
+ключи через панель. Обычный ключ не может изменить свой тип.
+
+Файлы
+`app/cli.py`, `app/models/access_tokens.py`, `app/routers/auth.py`,
+`app/routers/admin.py`, `docs/operations.md`.
+
+Пример
+```powershell
+$env:TVS_BOOTSTRAP_ADMIN_TOKEN="TVS_..."
+python -m app.cli create-admin --label "owner"
+```
+
+Критерий готовности
+После bootstrap администратор видит только административные операции;
+попытка выдать себе admin через профильный маршрут возвращает 403 и
+попадает в security-тесты.
+
+1.4 Обмен ключа на сессию
+Описание
+При вводе ключа отправлять POST body, не использовать query string.
+Сервер проверяет срок/revoke, создаёт или ротирует HttpOnly cookie, а ответ
+не содержит исходный токен. На всех state-changing запросах проверять
+Origin/CSRF-токен, cookie имеет `Secure` в production и `SameSite=Lax` или
+`Strict`.
+
+Файлы
+`app/routers/auth.py`, `app/security/sessions.py`,
+`frontend/src/pages/LoginPage.tsx`, `frontend/src/api/client.ts`.
+
+Пример
+```http
+POST /auth/redeem
+Content-Type: application/json
+
+{"token":"TVS_..."}
+```
+
+Критерий готовности
+Успешный redeem перенаправляет на `/dashboard`; неверный, истёкший и
+отозванный ключ дают нейтральную ошибку без раскрытия существования
+профиля.
+
+1.5 Дочерние API-ключи `tvs_`
+Описание
+В профиле создавать отдельные машинные ключи с префиксом `tvs_` и 128
+случайными символами. Они наследуют parent TVS-профиль, тот же список
+каналов и те же read-данные; при истечении/revoke родителя автоматически
+становятся недействительными. В API-ключе хранить префикс, hash,
+encrypted copy для повторного показа, parent_id, scopes, last_used_at и
+ revoked_at. По умолчанию scope только `read`.
+
+Файлы
+`app/models/api_keys.py`, `app/services/api_keys.py`,
+`app/routers/accounts.py`, `app/routers/v1.py`,
+`frontend/src/pages/ApiKeysPage.tsx`, `docs/api.md`.
+
+Пример
+```http
+Authorization: Bearer tvs_...
+GET /api/v1/channels/{login}/snapshot
+```
+
+Критерий готовности
+API-ключ не видит чужие каналы, не может обойти parent expiration и после
+отзыва parent немедленно получает 401/403 с кодом `parent_token_revoked`.
+
+1.6 Защита HTTP и abuse controls
+Описание
+Добавить лимиты на redeem, admin reveal, API-запросы и webhook-регистрации;
+маскировать Authorization в логах; применять CORS allowlist, security
+headers, ограничение размера JSON и запрет дублирующихся параметров.
+
+Файлы
+`app/main.py`, `app/security/ratelimit.py`, `app/security/csrf.py`,
+`app/middleware.py`, `tests/security/test_http.py`.
+
+Пример
+```text
+X-Content-Type-Options: nosniff
+Referrer-Policy: no-referrer
+X-Frame-Options: DENY
+```
+
+Критерий готовности
+Соседний сайт не может redeem-ить ключ, а flood, path traversal, XSS в
+title и подделка X-Forwarded-For покрыты автоматическими проверками.

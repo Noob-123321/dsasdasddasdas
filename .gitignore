@@ -1,0 +1,19 @@
+__pycache__/
+*.pyc
+.env
+src/data/
+data/*
+!data/.gitkeep
+.pytest_cache/
+.ruff_cache/
+qa-*.png
+backups/
+.playwright-mcp/
+
+# Throwaway SQLite file recreated on every pytest run.
+tests/_tvs_test.db
+
+# Local scratch files, never part of the project.
+AGENT.txt
+test_utf8.py
+Текстовый документ.txt

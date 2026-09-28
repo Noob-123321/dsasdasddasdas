@@ -1,0 +1,158 @@
+Шаг 6. Вход по ключу и управление портфелем
+=====
+
+Назначение и важность
+---------------------
+Реализовать основной пользовательский сценарий: один TVS-ключ открывает
+профиль, новый профиль пустой, а кнопка «Добавить» принимает несколько
+ссылок на Twitch-каналы. Сервер должен проверять права каждого канала и
+сразу ставить разрешённые каналы в наблюдение.
+
+Приоритет: P0
+
+Затрагиваемые файлы
+--------------------
+- `app/routers/auth.py`
+- `app/routers/profiles.py`
+- `app/services/profile_channels.py`
+- `app/services/channel_parser.py`
+- `app/repositories/profiles.py`
+- `app/repositories/channels.py`
+- `frontend/src/pages/LoginPage.tsx`
+- `frontend/src/pages/DashboardPage.tsx`
+- `frontend/src/components/AddChannelsModal.tsx`
+- `frontend/src/api/client.ts`
+- `tests/profiles/`
+
+1.1 Landing и обмен ключа на сессию
+Описание
+Сделать `/` отдельной страницей входа: одно поле, понятная инструкция,
+маскирование ввода, кнопка «Войти» и нейтральные состояния ошибки. После
+успешного `POST /auth/redeem` ставить HttpOnly cookie и делать client-side
+redirect на `/dashboard`.
+
+Файлы
+`app/routers/auth.py`, `app/security/sessions.py`,
+`frontend/src/pages/LoginPage.tsx`, `frontend/src/routes.tsx`.
+
+Пример
+```text
+Пользователь: TVS_<128 символов>
+Ответ: 204 + Set-Cookie: tvs_session=...
+Переход: /dashboard
+```
+
+Критерий готовности
+При валидном ключе пользователь оказывается на пустом dashboard, при
+невалидном не получает полезную информацию о других профилях.
+
+1.2 Парсер многострочного ввода
+Описание
+Принимать текст, разбивать по пробельным символам и переводам строк,
+извлекать Twitch URL или голый login, нормализовать в lowercase, удалять
+дубликаты и сохранять порядок. Показывать пользователю итог: принято,
+дубликаты, невалидные ссылки и уже существующие каналы.
+
+Файлы
+`app/services/channel_parser.py`, `app/schemas/channels.py`,
+`frontend/src/components/AddChannelsModal.tsx`, `tests/profiles/test_parser.py`.
+
+Пример
+```text
+https://www.twitch.tv/tumblurr
+https://twitch.tv/pesh
+the_realmarzaa
+```
+
+Критерий готовности
+Одна ссылка и 20 ссылок в одном textarea обрабатываются одинаково;
+ссылки с query/fragment нормализуются, запрещённые пути отклоняются.
+
+1.3 Проверка allowlist и unlimited
+Описание
+После нормализации проверять для каждого канала: разрешён ли он профилю
+администратором. Для `unlimited=true` разрешать любой публичный канал,
+кроме системных зарезервированных путей. Для ограниченного профиля
+возвращать частичный успех и список отклонённых каналов без утечки внутренних
+настроек.
+
+Файлы
+`app/routers/profiles.py`, `app/services/profile_channels.py`,
+`app/services/access_policy.py`, `tests/profiles/test_permissions.py`.
+
+Пример
+```json
+{
+  "added": ["tumblurr", "pesh"],
+  "duplicates": ["tumblurr"],
+  "rejected": ["private_channel"]
+}
+```
+
+Критерий готовности
+Ограниченный ключ не может добавить запрещённый канал даже прямым API-
+вызовом; unlimited-ключ работает без скрытого лимита количества.
+
+1.4 Пустой портфель и добавление
+Описание
+Сделать empty state с заголовком портфеля, счётчиком `0`, подсказкой и
+кнопкой «Добавить». После успешного добавления закрыть modal, обновить
+список и показать toast с числом новых каналов. Ошибка одного канала не
+отменяет успешное добавление остальных.
+
+Файлы
+`frontend/src/pages/DashboardPage.tsx`,
+`frontend/src/components/AddChannelsModal.tsx`,
+`frontend/src/components/EmptyPortfolio.tsx`, `tests/e2e/test_add_channels.py`.
+
+Пример
+```text
+Портфель пуст
+Добавьте одного или нескольких стримеров
+[Добавить]
+```
+
+Критерий готовности
+Новый профиль выглядит пустым, а не сломанным; массовое добавление
+остаётся доступным после перезагрузки страницы.
+
+1.5 Управление каналами профиля
+Описание
+Разрешить пользователю удалять канал из своего портфеля и просматривать
+его live/history/score. Административное изменение allowlist не должно
+мгновенно ломать открытый профиль: удалённый канал исчезает после refresh,
+но его история и аудит сохраняются.
+
+Файлы
+`app/routers/profiles.py`, `app/services/profile_channels.py`,
+`frontend/src/pages/ChannelDetailPage.tsx`, `tests/profiles/test_remove_channel.py`.
+
+Пример
+```http
+DELETE /api/profile/channels/tumblurr
+GET /api/profile/channels/tumblurr/history
+```
+
+Критерий готовности
+Удаление из портфеля не удаляет глобальные данные и не изменяет настройки
+другого профиля.
+
+1.6 Автообновление и свежесть
+Описание
+После добавления poller начинает наблюдение автоматически. Клиент polling
+раз в 30 секунд показывает age/freshness последнего snapshot; при ошибке
+Twitch не показывает пустые нули, а последние сохранённые значения с
+предупреждением.
+
+Файлы
+`app/routers/profiles.py`, `app/services/freshness.py`,
+`frontend/src/hooks/useChannelSnapshot.ts`, `tests/profiles/test_freshness.py`.
+
+Пример
+```json
+{"fetched_at":"2026-09-23T12:00:00Z","stale":true,"age_seconds":185}
+```
+
+Критерий готовности
+Пользователь всегда понимает, когда данные актуальны, а outage не
+превращается в ложный «оффлайн».

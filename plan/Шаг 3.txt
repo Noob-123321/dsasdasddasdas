@@ -1,0 +1,135 @@
+Шаг 3. PostgreSQL-схема, миграции и репозитории
+=====
+
+Назначение и важность
+---------------------
+Создать схему, которая выдерживает профили, административные ключи,
+дочерние API-ключи, сотни каналов, историю наблюдений и аудит без
+конкурирующих записей в JSON-файле. Схема должна заранее учитывать
+дедупликацию, сессии стримов, агрегаты, score и retention из идей Claude.
+
+Приоритет: P0
+
+Затрагиваемые файлы
+--------------------
+- `app/models/`
+- `app/db.py`
+- `app/repositories/`
+- `migrations/versions/`
+- `alembic.ini`
+- `scripts/migrate_legacy.py`
+- `tests/db/`
+- `docs/data-model.md`
+
+1.1 Профили, ключи и каналы
+Описание
+Создать `profiles` с меткой, unlimited-флагом и временем активности;
+`access_tokens` для `TVS_` с типом profile/admin, encrypted_secret,
+lookup_hash, prefix, expires_at, revoked_at, created_by и last_used;
+`api_keys` для `tvs_` с parent_access_token_id; `channels` как основной
+объект Twitch; `profile_channels` как связь профиля и канала.
+
+Файлы
+`app/models/profile.py`, `app/models/access_token.py`,
+`app/models/api_key.py`, `app/models/channel.py`,
+`app/models/profile_channel.py`, `migrations/versions/0001_initial.py`.
+
+Пример
+```text
+profiles(id, label, unlimited, created_at, last_seen_at)
+access_tokens(id, profile_id, kind, prefix, lookup_hash,
+              encrypted_secret, expires_at, revoked_at, last_used_at)
+profile_channels(profile_id, channel_login, source, added_at)
+```
+
+Критерий готовности
+Один профиль может иметь несколько ключей и каналов, но не может получить
+чужой канал через API; unlimited и allowlist имеют взаимоисключающие
+проверки.
+
+1.2 История наблюдений и сессии эфира
+Описание
+Добавить `streams`, `samples`, `samples_5m`, `samples_1h`,
+`metrics_daily`, `spikes` и `score_snapshots`. В `samples` хранить первый
+момент наблюдения, последний подтверждённый момент, repeat_count и
+interval_seconds. В `streams` различать `ended_at` (реально увидели уход)
+и `observed_until` (мы перестали наблюдать).
+
+Файлы
+`app/models/stream.py`, `app/models/sample.py`,
+`app/models/aggregates.py`, `app/models/score.py`,
+`migrations/versions/0002_observations.py`.
+
+Пример
+```text
+UNIQUE(login, observed_at, is_live)
+INDEX(login, observed_at)
+INDEX(login, bucket_start)
+```
+
+Критерий готовности
+Повторяющиеся значения продлевают строку, изменение только chatters создаёт
+новый факт, а перезапуск poller не выдаёт `observed_until` за конец стрима.
+
+1.3 Алерты, аудит и метрики сервера
+Описание
+Добавить `alert_rules`, `alert_events`, `webhooks`, `webhook_deliveries`,
+`audit_log` и `server_metrics`. Аудит хранит actor, action, object, IP,
+request_id, before/after без полного секрета. Метрики нагрузки хранятся
+агрегированными интервалами, чтобы не создавать огромный поток сырых логов.
+
+Файлы
+`app/models/alert.py`, `app/models/audit.py`,
+`app/models/server_metric.py`, `app/models/webhook.py`,
+`migrations/versions/0003_operations.py`.
+
+Пример
+```text
+server_metrics(metric_time, request_count, error_count, p50_ms,
+               p95_ms, poller_backlog, twitch_errors, db_pool_used)
+```
+
+Критерий готовности
+Администратор может найти, кто создал/изменил/показал/отозвал ключ, и
+получить временной ряд нагрузки без доступа к raw-логам с секретами.
+
+1.4 Индексы, ограничения и транзакции
+Описание
+Добавить уникальность lookup_hash, запрет повторного profile_channel,
+проверки диапазонов score/confidence/ratio, индексы под чтение истории и
+портфеля. Операции activate/revoke/reveal и webhook должны быть
+транзакционными и идемпотентными.
+
+Файлы
+`app/models/constraints.py`, `app/repositories/tokens.py`,
+`app/repositories/observations.py`, `migrations/versions/0004_constraints.py`.
+
+Пример
+```sql
+CREATE UNIQUE INDEX uq_access_tokens_hash ON access_tokens(lookup_hash);
+CREATE INDEX ix_samples_login_time ON samples(login, observed_at);
+```
+
+Критерий готовности
+Два параллельных redeem/revoke одного ключа не создают дубль, а тесты на
+PostgreSQL подтверждают foreign keys и ограничения.
+
+1.5 Retention и миграции
+Описание
+Задать raw samples на 30 дней, 5m aggregates на 14 дней, 1h/daily/score/
+spikes на постоянное хранение по умолчанию. Alembic должен уметь upgrade и
+downgrade; legacy JSON-импорт, если он нужен, — идемпотентный и с backup.
+
+Файлы
+`app/jobs/retention.py`, `scripts/migrate_legacy.py`,
+`migrations/env.py`, `docs/data-model.md`.
+
+Пример
+```powershell
+python -m alembic upgrade head
+python -m app.jobs.retention --dry-run
+```
+
+Критерий готовности
+Retention не удаляет исходные данные младше TTL, агрегаты остаются после
+очистки сырья, а повторный запуск не меняет агрегированные значения.

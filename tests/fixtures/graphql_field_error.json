@@ -1,0 +1,8 @@
+{
+  "errors": [
+    {
+      "message": "Cannot query field \"prerenderedViewersCount\" on type \"Stream\".",
+      "path": ["query", "user", "stream"]
+    }
+  ]
+}

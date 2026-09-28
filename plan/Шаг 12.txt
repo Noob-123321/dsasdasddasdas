@@ -1,0 +1,176 @@
+Шаг 12. Тестирование, приёмка и релизный чек-лист
+=====
+
+Назначение и важность
+---------------------
+Доказать, что выбранные функции работают вместе, а не только по отдельности.
+Особое внимание: вход по ключу, наследование API-ключей, права на каналы,
+корректность фоновой истории, честность score, безопасность секретов и
+видимость нагрузки сервера.
+
+Приоритет: P0
+
+Затрагиваемые файлы
+--------------------
+- `tests/unit/`
+- `tests/integration/`
+- `tests/security/`
+- `tests/e2e/`
+- `tests/load/`
+- `tests/lifecycle/`
+- `tests/fixtures/`
+- `pytest.ini`
+- `.github/workflows/ci.yml`
+- `docs/acceptance.md`
+- `docs/release-checklist.md`
+
+1.1 Unit и property-тесты
+Описание
+Покрыть генерацию формата, шифрование/hash, срок/revoke, URL-парсер,
+дедупликацию, stream sessions, spike detector, confidence, score weights,
+CSV escaping и расчёт метрик на синтетических рядах. Важны edge cases:
+пустое окно, один sample, одинаковые значения, переход midnight, offline.
+
+Файлы
+`tests/unit/test_tokens.py`, `tests/unit/test_parser.py`,
+`tests/unit/test_observations.py`, `tests/unit/test_scoring.py`,
+`tests/unit/test_exports.py`.
+
+Пример
+```python
+def test_tvs_format_is_prefix_plus_128_chars():
+    assert is_valid_tvs_token(generate_tvs_token())
+```
+
+Критерий готовности
+Каждое бизнес-правило имеет отдельный тест, нет сетевых запросов, тесты
+детерминированы по UTC clock.
+
+1.2 Integration на PostgreSQL и Redis
+Описание
+Проверить реальные миграции, unique constraints, concurrent redeem/revoke,
+parent-child API keys, allowlist/unlimited, retention, poller transactions,
+идемпотентные агрегаты и rate-limit атомарность. SQLite не считать
+эквивалентом PostgreSQL для этих проверок.
+
+Файлы
+`tests/integration/test_migrations.py`,
+`tests/integration/test_concurrency.py`, `tests/integration/test_ratelimit.py`,
+`tests/integration/test_persistence.py`.
+
+Пример
+```powershell
+docker compose -f docker-compose.test.yml up -d
+python -m pytest tests/integration -q
+```
+
+Критерий готовности
+Тесты проходят на чистой PostgreSQL, повторный запуск безопасен, а
+race-условия не оставляют partially committed state.
+
+1.3 Security tests
+Описание
+Проверить отсутствие секретов в URL/logs/Referer, CSRF/Origin, CORS,
+security headers, path traversal, XSS через stream title, admin escalation,
+SSRF webhook, DNS/IP validation, duplicate query parameters, rate-limit bypass
+через X-Forwarded-For и безопасность bootstrap.
+
+Файлы
+`tests/security/test_auth.py`, `tests/security/test_admin.py`,
+`tests/security/test_secrets.py`, `tests/security/test_webhook_ssrf.py`.
+
+Пример
+```python
+response = client.post("/api/profile/channels", json={"text": "<script>"})
+assert response.status_code == 400
+```
+
+Критерий готовности
+Каждый P0/P1 риск имеет автоматический regression test; secret scanner не
+находит реальных значений в репозитории.
+
+1.4 Poller lifecycle и outage tests
+Описание
+Запускать настоящий poller с fake Twitch: автоматическая регистрация канала,
+несколько циклов, dedup, stream transition, channel error/backoff, restart,
+SIGINT/SIGTERM/SIGBREAK и aggregate lookback. Отдельно проверить, что
+последние сохранённые данные остаются видимыми при outage.
+
+Файлы
+`tests/lifecycle/test_poller.py`, `tests/lifecycle/test_shutdown.py`,
+`tests/lifecycle/test_outage.py`.
+
+Пример
+```powershell
+python -m pytest tests/lifecycle -q
+```
+
+Критерий готовности
+Тест находит те же дефекты, которые unit-тесты не видят: потерю данных при
+остановке, запись в чужую БД и некорректное закрытие stream session.
+
+1.5 E2E пользовательского сценария
+Описание
+Пройти браузером: landing → ввод TVS → пустой dashboard → Add modal →
+несколько URL → таблица → график → score breakdown → stale state → API
+key creation → export → logout. Отдельно пройти admin login → token create →
+expiry/allowlist update → reveal/copy → revoke → audit → server load.
+
+Файлы
+`tests/e2e/test_user_journey.py`, `tests/e2e/test_admin_journey.py`,
+`tests/e2e/fixtures/demo_profile.py`.
+
+Пример
+```powershell
+python -m pytest tests/e2e -q --browser chromium
+```
+
+Критерий готовности
+Пользователь не может завершить основной путь только благодаря ручной
+правке localStorage или DevTools, а все видимые статусы соответствуют API.
+
+1.6 Нагрузочные и приёмочные тесты
+Описание
+Проверить redeem burst, 100–1000 каналов, 30 секунд dashboard polling,
+concurrent API reads, export burst, webhook retry storm и admin metrics
+under load. Зафиксировать целевые p95 и error budget, затем проверить
+критерии продукта.
+
+Файлы
+`tests/load/test_redeem.py`, `tests/load/test_api.py`,
+`tests/load/test_poller.py`, `docs/acceptance.md`.
+
+Пример
+```text
+1000 каналов · 60 s poller · 30 s UI refresh
+Цель: p95 API < 300 ms, p95 poller cycle < 55 s, error rate < 1%
+```
+
+Критерий готовности
+Есть измеренный отчёт, а не только «сервер не упал»; bottlenecks и
+выбранные лимиты зафиксированы в документации.
+
+1.7 Приёмочные сценарии и release checklist
+Описание
+Собрать финальную матрицу: все требования пользователя, P0 security,
+восстановление после restart, миграции, backup/restore, docs, demo seed,
+rollback и observability. Пункты без доказательства не закрываются.
+
+Файлы
+`docs/acceptance.md`, `docs/release-checklist.md`,
+`docs/api/`, `README.md`, `.env.example`.
+
+Пример
+```text
+[ ] TVS_ + 128 chars accepted and revoked
+[ ] unlimited profile can add any public channel
+[ ] restricted profile cannot add foreign channel
+[ ] API key dies with parent TVS
+[ ] poller survives Twitch/DB failure
+[ ] CSV/PDF and score explanation generated
+[ ] admin sees user activity and server load
+```
+
+Критерий готовности
+Release checklist закрыт полностью, тесты зелёные на чистом окружении,
+а у пользователя есть demo-профиль и тестовые ключи без production secrets.
